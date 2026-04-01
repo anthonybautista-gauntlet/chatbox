@@ -12,6 +12,7 @@ import { ProviderList } from '@/components/settings/provider/ProviderList'
 import { useProviderImport } from '@/hooks/useProviderImport'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import useVersion from '@/hooks/useVersion'
+import platform from '@/platform'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { add as addToast } from '@/stores/toastActions'
 import { decodeBase64 } from '@/utils/base64'
@@ -35,6 +36,12 @@ export function RouteComponent() {
   const customProviders = useSettingsStore((state) => state.customProviders)
   const providersMap = useSettingsStore((state) => state.providers)
   const { isExceeded } = useVersion()
+
+  useEffect(() => {
+    if (platform.type === 'web') {
+      navigate({ to: '/settings/default-models', replace: true })
+    }
+  }, [navigate])
 
   const providers = useMemo<ProviderInfo[]>(
     () =>

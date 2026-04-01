@@ -7,6 +7,7 @@ import { forwardRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import ModelSelector from '@/components/ModelSelector'
 import { ScalableIcon } from '@/components/common/ScalableIcon'
+import platform from '@/platform'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 export const Route = createFileRoute('/settings/default-models')({
@@ -16,6 +17,7 @@ export const Route = createFileRoute('/settings/default-models')({
 export function RouteComponent() {
   const { t } = useTranslation()
   const { setSettings, ...settings } = useSettingsStore((state) => state)
+  const isWebApp = platform.type === 'web'
 
   return (
     <Stack p="md" gap="xl">
@@ -58,7 +60,7 @@ export function RouteComponent() {
         </ModelSelector>
 
         <Text c="chatbox-tertiary" size="xs">
-          {t('Chatbox will use this model as the default for new chats.')}
+          {t(isWebApp ? 'ChatBridge will use this model as the default for new chats.' : 'Chatbox will use this model as the default for new chats.')}
         </Text>
       </Stack>
 
@@ -93,79 +95,83 @@ export function RouteComponent() {
         </ModelSelector>
 
         <Text c="chatbox-tertiary" size="xs">
-          {t('Chatbox will automatically use this model to rename threads.')}
+          {t(isWebApp ? 'ChatBridge will automatically use this model to rename threads.' : 'Chatbox will automatically use this model to rename threads.')}
         </Text>
       </Stack>
 
-      <Stack gap="xs">
-        <Text fw={600}>{t('Search Term Construction Model')}</Text>
+      {!isWebApp && (
+        <Stack gap="xs">
+          <Text fw={600}>{t('Search Term Construction Model')}</Text>
 
-        <ModelSelector
-          position="bottom-start"
-          width={320}
-          showAuto={true}
-          autoText={t('Auto (Use Chat Model)')!}
-          selectedProviderId={settings.searchTermConstructionModel?.provider}
-          selectedModelId={settings.searchTermConstructionModel?.model}
-          searchPosition="top"
-          onSelect={(provider, model) =>
-            setSettings({
-              searchTermConstructionModel:
-                provider && model
-                  ? {
-                      provider,
-                      model,
-                    }
-                  : undefined,
-            })
-          }
-        >
-          <ModelSelectContent
+          <ModelSelector
+            position="bottom-start"
+            width={320}
+            showAuto={true}
             autoText={t('Auto (Use Chat Model)')!}
-            provider={settings.searchTermConstructionModel?.provider}
-            model={settings.searchTermConstructionModel?.model}
-          />
-        </ModelSelector>
+            selectedProviderId={settings.searchTermConstructionModel?.provider}
+            selectedModelId={settings.searchTermConstructionModel?.model}
+            searchPosition="top"
+            onSelect={(provider, model) =>
+              setSettings({
+                searchTermConstructionModel:
+                  provider && model
+                    ? {
+                        provider,
+                        model,
+                      }
+                    : undefined,
+              })
+            }
+          >
+            <ModelSelectContent
+              autoText={t('Auto (Use Chat Model)')!}
+              provider={settings.searchTermConstructionModel?.provider}
+              model={settings.searchTermConstructionModel?.model}
+            />
+          </ModelSelector>
 
-        <Text c="chatbox-tertiary" size="xs">
-          {t('Chatbox will automatically use this model to construct search term.')}
-        </Text>
-      </Stack>
-      <Stack gap="xs">
-        <Text fw={600}>{t('OCR Model')}</Text>
+          <Text c="chatbox-tertiary" size="xs">
+            {t('Chatbox will automatically use this model to construct search term.')}
+          </Text>
+        </Stack>
+      )}
+      {!isWebApp && (
+        <Stack gap="xs">
+          <Text fw={600}>{t('OCR Model')}</Text>
 
-        <ModelSelector
-          position="bottom-start"
-          showAuto={true}
-          autoText={settings.licenseKey ? t('Auto (Use Chatbox AI)')! : t('None')!}
-          width={320}
-          modelFilter={(model) => model.capabilities?.includes('vision') ?? false}
-          selectedProviderId={settings.ocrModel?.provider}
-          selectedModelId={settings.ocrModel?.model}
-          searchPosition="top"
-          onSelect={(provider, model) =>
-            setSettings({
-              ocrModel:
-                provider && model
-                  ? {
-                      provider,
-                      model,
-                    }
-                  : undefined,
-            })
-          }
-        >
-          <ModelSelectContent
+          <ModelSelector
+            position="bottom-start"
+            showAuto={true}
             autoText={settings.licenseKey ? t('Auto (Use Chatbox AI)')! : t('None')!}
-            provider={settings.ocrModel?.provider}
-            model={settings.ocrModel?.model}
-          />
-        </ModelSelector>
+            width={320}
+            modelFilter={(model) => model.capabilities?.includes('vision') ?? false}
+            selectedProviderId={settings.ocrModel?.provider}
+            selectedModelId={settings.ocrModel?.model}
+            searchPosition="top"
+            onSelect={(provider, model) =>
+              setSettings({
+                ocrModel:
+                  provider && model
+                    ? {
+                        provider,
+                        model,
+                      }
+                    : undefined,
+              })
+            }
+          >
+            <ModelSelectContent
+              autoText={settings.licenseKey ? t('Auto (Use Chatbox AI)')! : t('None')!}
+              provider={settings.ocrModel?.provider}
+              model={settings.ocrModel?.model}
+            />
+          </ModelSelector>
 
-        <Text c="chatbox-tertiary" size="xs">
-          {t('Chatbox OCRs images with this model and sends the text to models without image support.')}
-        </Text>
-      </Stack>
+          <Text c="chatbox-tertiary" size="xs">
+            {t('Chatbox OCRs images with this model and sends the text to models without image support.')}
+          </Text>
+        </Stack>
+      )}
     </Stack>
   )
 }

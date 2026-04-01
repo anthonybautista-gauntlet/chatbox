@@ -22,8 +22,10 @@ import { useTranslation } from 'react-i18next'
 import z from 'zod'
 import { formatElapsedTime, useThinkingTimer } from '@/hooks/useThinkingTimer'
 import { cn } from '@/lib/utils'
+import { getAppForTool } from '@/packages/app-registry'
 import { getToolName } from '@/packages/tools'
 import type { SearchResultItem } from '@/packages/web-search'
+import { AppToolCallUI } from './AppToolCallUI'
 import { ScalableIcon } from '../common/ScalableIcon'
 
 const ToolCallHeader: FC<{ part: MessageToolCallPart; action: ReactNode; onClick: () => void }> = (props) => {
@@ -207,6 +209,9 @@ const GeneralToolCallUI: FC<{ part: MessageToolCallPart }> = ({ part }) => {
 }
 
 export const ToolCallPartUI: FC<{ part: MessageToolCallPart }> = ({ part }) => {
+  if (getAppForTool(part.toolName)) {
+    return <AppToolCallUI part={part} />
+  }
   if (part.toolName === 'web_search') {
     const parsedPart = WebBrowsingToolCallPartSchema.safeParse(part)
     if (parsedPart.success) {

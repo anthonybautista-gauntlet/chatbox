@@ -15,6 +15,7 @@ const log = getLogger('premium-actions')
  * @returns {boolean} whether the user has validated before
  */
 export function useAutoValidate(): boolean {
+  const isWebApp = platform.type === 'web'
   const licenseKey = useSettingsStore((state) => state.licenseKey)
   const licenseInstances = useSettingsStore((state) => state.licenseInstances)
   const clearValidatedData = () => {
@@ -26,6 +27,9 @@ export function useAutoValidate(): boolean {
     }))
   }
   useEffect(() => {
+    if (isWebApp) {
+      return
+    }
     void (async () => {
       if (!licenseKey || !licenseInstances) {
         // 这里不清除数据，因为可能是本地数据尚未加载
@@ -54,9 +58,9 @@ export function useAutoValidate(): boolean {
         }
       }
     })()
-  }, [licenseKey])
+  }, [licenseKey, licenseInstances, isWebApp])
   // licenseKey 且对应的 instanceId 都存在时，表示验证通过
-  if (!licenseKey || !licenseInstances) {
+  if (isWebApp || !licenseKey || !licenseInstances) {
     return false
   }
   return !!licenseInstances[licenseKey]

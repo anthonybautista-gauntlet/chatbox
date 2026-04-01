@@ -36,6 +36,7 @@ import {
 import fileToolSet from './toolsets/file'
 import { getToolSet } from './toolsets/knowledge-base'
 import websearchToolSet, { parseLinkTool, webSearchTool } from './toolsets/web-search'
+import { getAppToolsForSession } from '../app-registry'
 
 /**
  * 处理搜索结果并返回模型响应的通用函数
@@ -295,6 +296,13 @@ export async function streamText(
     // 4. construct tool set
     let tools: ToolSet = {
       ...mcpController.getAvailableTools(),
+    }
+    const isWebApp = (process.env.CHATBOX_BUILD_PLATFORM || 'unknown') === 'web'
+    if (isWebApp) {
+      tools = {
+        ...tools,
+        ...getAppToolsForSession(sessionId),
+      }
     }
     if (webBrowsing) {
       tools.web_search = webSearchTool

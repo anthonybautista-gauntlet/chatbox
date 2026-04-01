@@ -5,6 +5,12 @@ import { fetchRemoteModels } from '../../../models/openai-compatible'
 import type { ProviderModelInfo } from '../../../types'
 import type { ModelDependencies } from '../../../types/adapters'
 
+interface ProxyConfig {
+  baseURL: string
+  anonKey: string
+  getAccessToken: () => Promise<string | null> | string | null
+}
+
 interface Options {
   apiKey: string
   model: ProviderModelInfo
@@ -12,6 +18,7 @@ interface Options {
   topP?: number
   maxOutputTokens?: number
   stream?: boolean
+  proxy?: ProxyConfig
 }
 
 export default class OpenRouter extends AbstractAISDKModel {
@@ -32,7 +39,28 @@ export default class OpenRouter extends AbstractAISDKModel {
     }
   }
 
+  private createProxyFetch(proxy: ProxyConfig): typeof fetch {
+    return async (input: RequestInfo | URL, init?: RequestInit) => {
+      const token = await proxy.getAccessToken()
+      if (!token) {
+        throw new Error('Not authenticated. Please sign in to use the chat.')
+      }
+      const headers = new Headers(init?.headers)
+      headers.set('apikey', proxy.anonKey)
+      headers.set('x-supabase-auth', token)
+      return globalThis.fetch(input, { ...init, headers })
+    }
+  }
+
   protected getProvider() {
+    if (this.options.proxy) {
+      return createOpenRouter({
+        apiKey: 'proxy-managed',
+        baseURL: this.options.proxy.baseURL,
+        fetch: this.createProxyFetch(this.options.proxy),
+      })
+    }
+
     return createOpenRouter({
       apiKey: this.options.apiKey,
       headers: {

@@ -3,6 +3,7 @@ import { zodValidator } from '@tanstack/zod-adapter'
 import { useEffect } from 'react'
 import { z } from 'zod'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
+import platform from '@/platform'
 
 const searchSchema = z.object({
   settings: z.string().optional(), // b64 encoded config
@@ -18,7 +19,7 @@ export function RouteComponent() {
   const navigate = useNavigate()
   useEffect(() => {
     if (!isSmallScreen) {
-      navigate({ to: '/settings/chatbox-ai', replace: true })
+      navigate({ to: platform.type === 'web' ? '/settings/default-models' : '/settings/chatbox-ai', replace: true })
     }
   }, [isSmallScreen, navigate])
 

@@ -56,18 +56,24 @@ import * as premiumActions from '@/stores/premiumActions'
 import * as settingActions from '@/stores/settingActions'
 import { settingsStore, useLanguage, useSettingsStore, useTheme } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
+import AuthGate from '@/components/auth/AuthGate'
 
 function Root() {
   const location = useLocation()
   const spellCheck = useSettingsStore((state) => state.spellCheck)
   const language = useLanguage()
   const initialized = useRef(false)
+  const isWebApp = platform.type === 'web'
 
   const setOpenAboutDialog = useUIStore((s) => s.setOpenAboutDialog)
 
   const setRemoteConfig = useSetAtom(atoms.remoteConfigAtom)
 
   useEffect(() => {
+    if (isWebApp) {
+      initialized.current = true
+      return
+    }
     if (initialized.current) {
       return
     }
@@ -96,7 +102,7 @@ function Root() {
     }, 2000)
 
     return () => clearTimeout(tid)
-  }, [setOpenAboutDialog, setRemoteConfig, location.pathname])
+  }, [isWebApp, setOpenAboutDialog, setRemoteConfig, location.pathname])
 
   const showSidebar = useUIStore((s) => s.showSidebar)
   const sidebarWidth = useSidebarWidth()
@@ -193,7 +199,7 @@ function Root() {
       {/* 图片预览 */}
       <PictureDialog />
       {/* 似乎是从后端拉一个弹窗的配置 */}
-      <RemoteDialogWindow />
+      {!isWebApp && <RemoteDialogWindow />}
       {/* 手机端举报内容 */}
       {/* <ReportContentDialog /> */}
       {/* 搜索 */}
@@ -492,7 +498,9 @@ export const Route = createRootRoute({
           <CssBaseline />
           <NiceModal.Provider>
             <ErrorBoundary>
-              <Root />
+              <AuthGate>
+                <Root />
+              </AuthGate>
             </ErrorBoundary>
           </NiceModal.Provider>
         </ThemeProvider>

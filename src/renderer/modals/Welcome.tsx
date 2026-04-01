@@ -3,11 +3,13 @@ import { Button, Image, List, Paper, Stack, Text, Title } from '@mantine/core'
 import { useTranslation } from 'react-i18next'
 import { AdaptiveModal } from '@/components/common/AdaptiveModal'
 import icon from '../static/icon.png'
+import platform from '../platform'
 import { navigateToSettings } from './Settings'
 
 const Welcome = NiceModal.create(() => {
   const { t } = useTranslation()
   const modal = useModal()
+  const isWebApp = platform.type === 'web'
 
   const onClose = () => {
     modal.resolve()
@@ -30,8 +32,8 @@ const Welcome = NiceModal.create(() => {
           <Stack gap="sm" align="center">
             <Image src={icon} w={86} h={86} />
             <Stack gap="3xs" align="center">
-              <Title order={3}>Chatbox</Title>
-              <Text size="md">{t('An easy-to-use AI client app')}</Text>
+              <Title order={3}>{isWebApp ? 'ChatBridge' : 'Chatbox'}</Title>
+              <Text size="md">{t(isWebApp ? 'A secure AI workspace for connected tools' : 'An easy-to-use AI client app')}</Text>
             </Stack>
           </Stack>
 
@@ -44,19 +46,21 @@ const Welcome = NiceModal.create(() => {
 
         <Paper shadow="none" radius="md" withBorder p="lg">
           <Stack gap="sm">
-            <Text className="text-center">{t('Select and configure an AI model provider')}</Text>
+            <Text className="text-center">
+              {t(isWebApp ? 'Review your chat settings to get started' : 'Select and configure an AI model provider')}
+            </Text>
             <Button
               size="lg"
               h={54}
               radius="md"
               classNames={{ root: '!outline-none', label: 'flex flex-col items-center justify-center' }}
               onClick={() => {
-                navigateToSettings('/provider/chatbox-ai')
+                navigateToSettings(isWebApp ? '/default-models' : '/provider/chatbox-ai')
                 modal.resolve('setup')
                 modal.hide()
               }}
             >
-              {t('Setup Provider')}
+              {t(isWebApp ? 'Open Settings' : 'Setup Provider')}
             </Button>
           </Stack>
         </Paper>

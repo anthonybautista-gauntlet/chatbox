@@ -25,27 +25,37 @@ import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import platform from '@/platform'
 import { featureFlags } from '@/utils/feature-flags'
 
+const isWebApp = platform.type === 'web'
+
 const ITEMS = [
-  {
-    key: 'chatbox-ai',
-    label: 'Chatbox AI',
-    icon: <IconSparkles className="w-full h-full" />,
-  },
-  {
-    key: 'provider',
-    label: 'Model Provider',
-    icon: <IconCategory className="w-full h-full" />,
-  },
+  ...(isWebApp
+    ? []
+    : [
+        {
+          key: 'chatbox-ai',
+          label: 'Chatbox AI',
+          icon: <IconSparkles className="w-full h-full" />,
+        },
+        {
+          key: 'provider',
+          label: 'Model Provider',
+          icon: <IconCategory className="w-full h-full" />,
+        },
+      ]),
   {
     key: 'default-models',
     label: 'Default Models',
     icon: <IconBox className="w-full h-full" />,
   },
-  {
-    key: 'web-search',
-    label: 'Web Search',
-    icon: <IconWorldWww className="w-full h-full" />,
-  },
+  ...(isWebApp
+    ? []
+    : [
+        {
+          key: 'web-search',
+          label: 'Web Search',
+          icon: <IconWorldWww className="w-full h-full" />,
+        },
+      ]),
   ...(featureFlags.mcp
     ? [
         {
@@ -64,11 +74,15 @@ const ITEMS = [
         },
       ]
     : []),
-  {
-    key: 'document-parser',
-    label: 'Document Parser',
-    icon: <IconFileText className="w-full h-full" />,
-  },
+  ...(isWebApp
+    ? []
+    : [
+        {
+          key: 'document-parser',
+          label: 'Document Parser',
+          icon: <IconFileText className="w-full h-full" />,
+        },
+      ]),
   {
     key: 'chat',
     label: 'Chat Settings',

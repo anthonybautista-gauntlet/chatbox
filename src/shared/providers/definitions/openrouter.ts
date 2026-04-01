@@ -2,6 +2,48 @@ import { ModelProviderEnum, ModelProviderType } from '../../types'
 import { defineProvider } from '../registry'
 import OpenRouter from './models/openrouter'
 
+function getWebProxyConfig() {
+  const isWeb = (process.env.CHATBOX_BUILD_PLATFORM || 'unknown') === 'web'
+  if (!isWeb) return undefined
+
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || ''
+  const anonKey = process.env.VITE_SUPABASE_ANON_KEY || ''
+  if (!supabaseUrl || !anonKey) return undefined
+
+  return {
+    baseURL: `${supabaseUrl}/functions/v1/llm-proxy`,
+    anonKey,
+    getAccessToken: async () => {
+      try {
+        const [{ supabaseAuthStore }, { supabase }] = await Promise.all([
+          import('../../../renderer/stores/supabaseAuthStore.js'),
+          import('../../../renderer/lib/supabase.js'),
+        ])
+
+        const storeToken = supabaseAuthStore.getState().getAccessToken()
+        if (storeToken) return storeToken
+
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        if (session?.access_token) return session.access_token
+      } catch {
+        // Fall back to persisted session parsing below if module loading or auth state lookup fails.
+      }
+
+      try {
+        const storageKey = `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`
+        const raw = localStorage.getItem(storageKey)
+        if (!raw) return null
+        const parsed = JSON.parse(raw)
+        return parsed?.access_token ?? parsed?.currentSession?.access_token ?? parsed?.session?.access_token ?? null
+      } catch {
+        return null
+      }
+    },
+  }
+}
+
 export const openRouterProvider = defineProvider({
   id: ModelProviderEnum.OpenRouter,
   name: 'OpenRouter',
@@ -13,81 +55,60 @@ export const openRouterProvider = defineProvider({
     apiHost: 'https://openrouter.ai/api/v1',
     models: [
       {
-        modelId: 'google/gemini-3-pro-preview',
+        modelId: 'anthropic/claude-opus-4.5',
         type: 'chat',
-        nickname: 'Google: Gemini 3 Pro',
+        nickname: 'Anthropic: Claude Opus 4.5',
         capabilities: ['tool_use', 'vision'],
-        contextWindow: 1048576,
+        contextWindow: 200000,
       },
       {
-        modelId: 'google/gemini-2.5-pro',
+        modelId: 'anthropic/claude-sonnet-4.5',
         type: 'chat',
-        nickname: 'Google: Gemini 2.5 Pro',
+        nickname: 'Anthropic: Claude Sonnet 4.5',
         capabilities: ['tool_use', 'vision'],
-        contextWindow: 1048576,
+        contextWindow: 1000000,
       },
       {
-        modelId: 'google/gemini-2.5-flash-image-preview',
+        modelId: 'anthropic/claude-haiku-4.5',
         type: 'chat',
-        nickname: 'Google: Gemini 2.5 Flash Image Preview',
+        nickname: 'Anthropic: Claude Haiku 4.5',
         capabilities: ['tool_use', 'vision'],
-        contextWindow: 32768,
+        contextWindow: 200000,
       },
       {
-        modelId: 'openai/gpt-5-chat',
+        modelId: 'openai/gpt-4o',
         type: 'chat',
-        nickname: 'OpenAI: GPT-5 Chat',
-        capabilities: ['tool_use', 'vision'],
-        contextWindow: 128000,
-      },
-      {
-        modelId: 'openai/gpt-4o-2024-11-20',
-        type: 'chat',
-        nickname: 'OpenAI: GPT-4o (2024-11-20)',
+        nickname: 'OpenAI: GPT-4o',
         capabilities: ['tool_use', 'vision'],
         contextWindow: 128000,
       },
       {
-        modelId: 'x-ai/grok-3-mini',
+        modelId: 'openai/gpt-4o-mini',
         type: 'chat',
-        nickname: 'xAI: Grok 3 Mini',
-        capabilities: ['tool_use'],
-        contextWindow: 131072,
+        nickname: 'OpenAI: GPT-4o Mini',
+        capabilities: ['tool_use', 'vision'],
+        contextWindow: 128000,
       },
       {
-        modelId: 'deepseek/deepseek-chat-v3.1:free',
+        modelId: 'google/gemini-3.1-flash-lite-preview',
         type: 'chat',
-        nickname: 'DeepSeek: DeepSeek V3.1 (free)',
-        capabilities: ['tool_use'],
-        contextWindow: 64000,
+        nickname: 'Google: Gemini 3.1 Flash Lite Preview',
+        capabilities: ['vision'],
+        contextWindow: 1048576,
       },
       {
-        modelId: 'deepseek/deepseek-chat-v3-0324:free',
+        modelId: 'google/gemini-3.1-pro-preview',
         type: 'chat',
-        nickname: 'DeepSeek: DeepSeek V3 0324 (free)',
-        capabilities: ['tool_use'],
-        contextWindow: 163840,
+        nickname: 'Google: Gemini 3.1 Pro Preview',
+        capabilities: ['tool_use', 'vision'],
+        contextWindow: 1048576,
       },
       {
-        modelId: 'deepseek/deepseek-r1-0528',
+        modelId: 'moonshotai/kimi-k2.5',
         type: 'chat',
-        nickname: 'DeepSeek: R1 0528',
-        capabilities: ['tool_use'],
-        contextWindow: 163840,
-      },
-      {
-        modelId: 'deepseek/deepseek-r1:free',
-        type: 'chat',
-        nickname: 'DeepSeek: R1 (free)',
-        capabilities: ['tool_use'],
-        contextWindow: 163840,
-      },
-      {
-        modelId: 'tngtech/deepseek-r1t2-chimera:free',
-        type: 'chat',
-        nickname: 'TNG: DeepSeek R1T2 Chimera (free)',
-        capabilities: ['tool_use'],
-        contextWindow: 163840,
+        nickname: 'MoonshotAI: Kimi K2.5',
+        capabilities: ['tool_use', 'vision'],
+        contextWindow: 262144,
       },
     ],
   },
@@ -100,6 +121,7 @@ export const openRouterProvider = defineProvider({
         topP: config.settings.topP,
         maxOutputTokens: config.settings.maxTokens,
         stream: config.settings.stream,
+        proxy: getWebProxyConfig(),
       },
       config.dependencies
     )

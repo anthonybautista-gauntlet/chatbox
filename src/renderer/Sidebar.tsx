@@ -1,10 +1,11 @@
-import { ActionIcon, Box, Button, Flex, Image, NavLink, Stack, Text, Tooltip } from '@mantine/core'
+import { ActionIcon, Avatar, Box, Button, Flex, Image, NavLink, Stack, Text, Tooltip } from '@mantine/core'
 import SwipeableDrawer from '@mui/material/SwipeableDrawer'
 import {
   IconCirclePlus,
   IconCode,
   IconInfoCircle,
   IconLayoutSidebarLeftCollapse,
+  IconLogout,
   IconMessageChatbot,
   IconPhotoPlus,
   IconSettingsFilled,
@@ -26,17 +27,20 @@ import { trackingEvent } from './packages/event'
 import platform from './platform'
 import icon from './static/icon.png'
 import { useLanguage } from './stores/settingsStore'
+import { supabaseAuthStore, useSupabaseUser } from './stores/supabaseAuthStore'
 import { useUIStore } from './stores/uiStore'
 import { CHATBOX_BUILD_PLATFORM } from './variables'
 
 export default function Sidebar() {
   const { t } = useTranslation()
   const versionHook = useVersion()
+  const user = useSupabaseUser()
   const language = useLanguage()
   const navigate = useNavigate()
   const showSidebar = useUIStore((s) => s.showSidebar)
   const setShowSidebar = useUIStore((s) => s.setShowSidebar)
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
+  const isWebApp = platform.type === 'web'
 
   const sessionListViewportRef = useRef<HTMLDivElement>(null)
 
@@ -66,6 +70,13 @@ export default function Sidebar() {
     }
     trackingEvent('open_image_creator', { event_category: 'user' })
   }, [isSmallScreen, setShowSidebar, navigate])
+
+  const handleSignOut = useCallback(() => {
+    void supabaseAuthStore.getState().signOut()
+    if (isSmallScreen) {
+      setShowSidebar(false)
+    }
+  }, [isSmallScreen, setShowSidebar])
 
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
@@ -140,12 +151,12 @@ export default function Sidebar() {
             <Flex
               align="center"
               gap="sm"
-              onClick={() => platform.openLink('https://chatboxai.app/')}
-              style={{ cursor: 'pointer' }}
+              onClick={isWebApp ? undefined : () => platform.openLink('https://chatboxai.app/')}
+              style={isWebApp ? undefined : { cursor: 'pointer' }}
             >
               <Image src={icon} w={20} h={20} />
               <Text span c="chatbox-secondary" size="xl" lh={1.2} fw="700">
-                Chatbox
+                {isWebApp ? 'ChatBridge' : 'Chatbox'}
               </Text>
             </Flex>
             {FORCE_ENABLE_DEV_PAGES && <ThemeSwitchButton size="xs" />}
@@ -167,27 +178,31 @@ export default function Sidebar() {
               <ScalableIcon icon={IconCirclePlus} className="mr-2" />
               {t('New Chat')}
             </Button>
-            <Button variant="light" fullWidth onClick={handleCreateNewPictureSession}>
-              <ScalableIcon icon={IconPhotoPlus} className="mr-2" />
-              {t('Create Image')}
-            </Button>
+            {!isWebApp && (
+              <Button variant="light" fullWidth onClick={handleCreateNewPictureSession}>
+                <ScalableIcon icon={IconPhotoPlus} className="mr-2" />
+                {t('Create Image')}
+              </Button>
+            )}
           </Stack>
-          <NavLink
-            c="chatbox-secondary"
-            className="rounded"
-            label={t('My Copilots')}
-            leftSection={<ScalableIcon icon={IconMessageChatbot} size={20} />}
-            onClick={() => {
-              navigate({
-                to: '/copilots',
-              })
-              if (isSmallScreen) {
-                setShowSidebar(false)
-              }
-            }}
-            variant="light"
-            p="xs"
-          />
+          {!isWebApp && (
+            <NavLink
+              c="chatbox-secondary"
+              className="rounded"
+              label={t('My Copilots')}
+              leftSection={<ScalableIcon icon={IconMessageChatbot} size={20} />}
+              onClick={() => {
+                navigate({
+                  to: '/copilots',
+                })
+                if (isSmallScreen) {
+                  setShowSidebar(false)
+                }
+              }}
+              variant="light"
+              p="xs"
+            />
+          )}
           <NavLink
             c="chatbox-secondary"
             className="rounded"
@@ -220,29 +235,51 @@ export default function Sidebar() {
               p="xs"
             />
           )}
-          <NavLink
-            c="chatbox-tertiary"
-            className="rounded"
-            label={
-              <Flex align="center" gap={6}>
-                <span>{`${t('About')} ${/\d/.test(versionHook.version) ? `(${versionHook.version})` : ''}`}</span>
-                {CHATBOX_BUILD_PLATFORM === 'android' && versionHook.needCheckUpdate && (
-                  <Box w={8} h={8} miw={8} bg="chatbox-brand" style={{ borderRadius: '50%' }} />
-                )}
-              </Flex>
-            }
-            leftSection={<ScalableIcon icon={IconInfoCircle} size={20} />}
-            onClick={() => {
-              navigate({
-                to: '/about',
-              })
-              if (isSmallScreen) {
-                setShowSidebar(false)
+          {isWebApp && user && (
+            <Box px="xs" pt="xs">
+              <Stack gap="xs" p="sm" className="rounded-md border border-solid border-chatbox-border-primary">
+                <Flex align="center" gap="sm">
+                  <Avatar src={user.user_metadata?.avatar_url} radius="xl" />
+                  <Box flex={1} miw={0}>
+                    <Text fw={600} lineClamp={1}>
+                      {user.user_metadata?.full_name || user.user_metadata?.name || 'Signed in'}
+                    </Text>
+                    <Text c="chatbox-tertiary" size="xs" lineClamp={1}>
+                      {user.email}
+                    </Text>
+                  </Box>
+                </Flex>
+                <Button variant="light" fullWidth leftSection={<IconLogout size={16} />} onClick={handleSignOut}>
+                  Sign Out
+                </Button>
+              </Stack>
+            </Box>
+          )}
+          {!isWebApp && (
+            <NavLink
+              c="chatbox-tertiary"
+              className="rounded"
+              label={
+                <Flex align="center" gap={6}>
+                  <span>{`${t('About')} ${/\d/.test(versionHook.version) ? `(${versionHook.version})` : ''}`}</span>
+                  {CHATBOX_BUILD_PLATFORM === 'android' && versionHook.needCheckUpdate && (
+                    <Box w={8} h={8} miw={8} bg="chatbox-brand" style={{ borderRadius: '50%' }} />
+                  )}
+                </Flex>
               }
-            }}
-            variant="light"
-            p="xs"
-          />
+              leftSection={<ScalableIcon icon={IconInfoCircle} size={20} />}
+              onClick={() => {
+                navigate({
+                  to: '/about',
+                })
+                if (isSmallScreen) {
+                  setShowSidebar(false)
+                }
+              }}
+              variant="light"
+              p="xs"
+            />
+          )}
         </Stack>
         {!isSmallScreen && (
           <Box

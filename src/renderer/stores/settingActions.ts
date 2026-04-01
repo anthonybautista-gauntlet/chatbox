@@ -4,6 +4,9 @@ import * as atoms from './atoms'
 import { settingsStore } from './settingsStore'
 
 export function needEditSetting() {
+  if ((process.env.CHATBOX_BUILD_PLATFORM || 'unknown') === 'web') {
+    return false
+  }
   const settings = settingsStore.getState()
 
   // 激活了chatbox ai

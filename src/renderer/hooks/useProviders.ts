@@ -8,6 +8,7 @@ export const useProviders = () => {
   const { chatboxAIModels } = useChatboxAIModels()
   const { setSettings, ...settings } = useSettingsStore((state) => state)
   const providerSettingsMap = settings.providers
+  const isWebApp = (process.env.CHATBOX_BUILD_PLATFORM || 'unknown') === 'web'
 
   const allProviderBaseInfos = useMemo(
     () => [...SystemProviders(), ...(settings.customProviders || [])],
@@ -18,6 +19,16 @@ export const useProviders = () => {
       allProviderBaseInfos
         .map((p) => {
           const providerSettings = providerSettingsMap?.[p.id]
+          if (isWebApp) {
+            if (p.id !== ModelProviderEnum.OpenRouter) {
+              return null
+            }
+            return {
+              models: providerSettings?.models || p.defaultSettings?.models,
+              ...p,
+              ...providerSettings,
+            } as ProviderInfo
+          }
           if (p.id === ModelProviderEnum.ChatboxAI && settings.licenseKey) {
             return {
               ...p,
@@ -40,7 +51,7 @@ export const useProviders = () => {
           }
         })
         .filter((p) => !!p),
-    [providerSettingsMap, allProviderBaseInfos, chatboxAIModels, settings.licenseKey]
+    [providerSettingsMap, allProviderBaseInfos, chatboxAIModels, settings.licenseKey, isWebApp]
   )
 
   const favoritedModels = useMemo(

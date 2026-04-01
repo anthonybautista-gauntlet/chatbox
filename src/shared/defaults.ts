@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { type Config, ModelProviderEnum, type SessionSettings, type Settings, Theme } from './types'
 
 export function settings(): Settings {
+  const isWebApp = (process.env.CHATBOX_BUILD_PLATFORM || 'unknown') === 'web'
   return {
     // aiProvider: ModelProviderEnum.OpenAI,
     // openaiKey: '',
@@ -81,6 +82,12 @@ export function settings(): Settings {
     spellCheck: true,
 
     defaultPrompt: getDefaultPrompt(),
+    defaultChatModel: isWebApp
+      ? {
+          provider: ModelProviderEnum.OpenRouter,
+          model: 'google/gemini-3.1-flash-lite-preview',
+        }
+      : undefined,
 
     allowReportingAndTracking: true,
 
@@ -150,6 +157,13 @@ export function getDefaultPrompt() {
 }
 
 export function chatSessionSettings(): SessionSettings {
+  if ((process.env.CHATBOX_BUILD_PLATFORM || 'unknown') === 'web') {
+    return {
+      provider: ModelProviderEnum.OpenRouter,
+      modelId: 'google/gemini-3.1-flash-lite-preview',
+      maxContextMessageCount: Number.MAX_SAFE_INTEGER,
+    }
+  }
   return {
     provider: ModelProviderEnum.ChatboxAI,
     modelId: 'chatboxai-4',
