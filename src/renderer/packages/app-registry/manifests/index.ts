@@ -115,4 +115,236 @@ export const chessAppManifest: AppManifest = {
   ],
 }
 
-export const defaultApps: AppManifest[] = [chessAppManifest]
+export const canvasAppManifest: AppManifest = {
+  id: 'canvas',
+  name: 'Drawing Canvas',
+  version: '0.1.0',
+  description:
+    'A bundled drawing canvas that supports freehand user drawing and structured drawing commands from the assistant.',
+  type: 'internal',
+  url: '/apps/canvas/index.html',
+  permissions: [],
+  completionSignals: [],
+  tools: [
+    {
+      name: 'open_canvas',
+      description:
+        'Open the drawing canvas. If a previous drawing exists it will be resumed automatically. Do NOT call this before draw_on_canvas because the canvas opens automatically for any tool.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+      returns: {
+        type: 'object',
+        properties: {
+          status: {
+            type: 'string',
+            enum: ['canvas_opened', 'canvas_resumed'],
+          },
+          commandCount: { type: 'number' },
+          canvasWidth: { type: 'number' },
+          canvasHeight: { type: 'number' },
+        },
+        required: ['status'],
+      },
+      uiTrigger: true,
+      timeoutMs: 30_000,
+    },
+    {
+      name: 'draw_on_canvas',
+      description:
+        'Draw shapes and paths on the canvas. The canvas uses a 600x400 coordinate system. Each command is rendered in order. The canvas opens automatically if not already open.',
+      parameters: {
+        type: 'object',
+        properties: {
+          commands: {
+            type: 'array',
+            description: 'Drawing commands executed in order.',
+            items: {
+              type: 'object',
+              properties: {
+                type: {
+                  type: 'string',
+                  enum: ['line', 'rect', 'circle', 'ellipse', 'path', 'text'],
+                },
+                x: {
+                  type: 'number',
+                  description: 'X position for rect and text commands.',
+                },
+                y: {
+                  type: 'number',
+                  description: 'Y position for rect and text commands.',
+                },
+                x1: {
+                  type: 'number',
+                  description: 'Start X for line commands.',
+                },
+                y1: {
+                  type: 'number',
+                  description: 'Start Y for line commands.',
+                },
+                x2: {
+                  type: 'number',
+                  description: 'End X for line commands.',
+                },
+                y2: {
+                  type: 'number',
+                  description: 'End Y for line commands.',
+                },
+                cx: {
+                  type: 'number',
+                  description: 'Center X for circle and ellipse commands.',
+                },
+                cy: {
+                  type: 'number',
+                  description: 'Center Y for circle and ellipse commands.',
+                },
+                radius: {
+                  type: 'number',
+                  description: 'Radius for circle commands.',
+                },
+                rx: {
+                  type: 'number',
+                  description: 'Horizontal radius for ellipse commands.',
+                },
+                ry: {
+                  type: 'number',
+                  description: 'Vertical radius for ellipse commands.',
+                },
+                width: {
+                  type: 'number',
+                  description: 'Width for rect commands.',
+                },
+                height: {
+                  type: 'number',
+                  description: 'Height for rect commands.',
+                },
+                points: {
+                  type: 'array',
+                  description: 'Array of [x, y] points for path commands.',
+                  items: {
+                    type: 'array',
+                    items: {
+                      type: 'number',
+                    },
+                  },
+                },
+                text: {
+                  type: 'string',
+                  description: 'Text content for text commands.',
+                },
+                fontSize: {
+                  type: 'number',
+                  description: 'Font size in pixels for text commands. Defaults to 16.',
+                },
+                color: {
+                  type: 'string',
+                  description: 'Hex color string. Defaults to #000000.',
+                },
+                fill: {
+                  type: 'boolean',
+                  description: 'Whether the shape should be filled. Defaults to false.',
+                },
+                lineWidth: {
+                  type: 'number',
+                  description: 'Stroke width in pixels. Defaults to 2.',
+                },
+              },
+              required: ['type'],
+            },
+          },
+        },
+        required: ['commands'],
+      },
+      returns: {
+        type: 'object',
+        properties: {
+          status: { type: 'string' },
+          commandsExecuted: { type: 'number' },
+        },
+        required: ['status', 'commandsExecuted'],
+      },
+      uiTrigger: false,
+      timeoutMs: 30_000,
+    },
+    {
+      name: 'get_canvas_state',
+      description:
+        'Return metadata about the current canvas. ALWAYS call this before commenting on or analyzing the drawing. The canvas opens automatically if not already open.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+      returns: {
+        type: 'object',
+        properties: {
+          commandCount: { type: 'number' },
+          colorsUsed: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          canvasWidth: { type: 'number' },
+          canvasHeight: { type: 'number' },
+          recentCommands: {
+            type: 'array',
+            items: {
+              type: 'object',
+            },
+          },
+        },
+        required: ['commandCount', 'canvasWidth', 'canvasHeight'],
+      },
+      uiTrigger: false,
+      timeoutMs: 30_000,
+    },
+    {
+      name: 'reset_canvas',
+      description: 'Clear the canvas completely. Use when the user wants to start over.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+      returns: {
+        type: 'object',
+        properties: {
+          status: { type: 'string' },
+        },
+        required: ['status'],
+      },
+      uiTrigger: false,
+      timeoutMs: 30_000,
+    },
+    {
+      name: 'save_image',
+      description:
+        'Save the current canvas as a PNG image. Trigger a browser download and return a confirmation, not the image data itself.',
+      parameters: {
+        type: 'object',
+        properties: {
+          filename: {
+            type: 'string',
+            description: 'Download filename. Defaults to canvas.png.',
+          },
+        },
+        required: [],
+      },
+      returns: {
+        type: 'object',
+        properties: {
+          status: { type: 'string' },
+          filename: { type: 'string' },
+        },
+        required: ['status'],
+      },
+      uiTrigger: false,
+      timeoutMs: 30_000,
+    },
+  ],
+}
+
+export const defaultApps: AppManifest[] = [chessAppManifest, canvasAppManifest]

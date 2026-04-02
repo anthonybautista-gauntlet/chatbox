@@ -66,19 +66,36 @@ export function AppIframeHost(props: AppIframeHostProps) {
   const toolRegistration = getAppForTool(`${appId}.${toolName}`)
   const liveInvocation = getLiveInvocation(invocationId)
 
-  const iframeOrigin = useMemo(() => {
+  const iframeSrc = useMemo(() => {
     if (!manifest) {
       return null
     }
 
     try {
-      return new URL(manifest.url).origin
+      return new URL(manifest.url, window.location.origin).toString()
     } catch (_error) {
       return null
     }
   }, [manifest])
 
-  const sandbox = manifest?.type === 'external_authenticated' ? 'allow-scripts allow-forms allow-popups' : 'allow-scripts allow-forms'
+  const iframeOrigin = useMemo(() => {
+    if (!iframeSrc) {
+      return null
+    }
+
+    try {
+      return new URL(iframeSrc).origin
+    } catch (_error) {
+      return null
+    }
+  }, [iframeSrc])
+
+  const sandbox =
+    manifest?.type === 'external_authenticated'
+      ? 'allow-scripts allow-forms allow-popups'
+      : manifest?.type === 'internal'
+        ? 'allow-scripts allow-forms allow-downloads'
+        : 'allow-scripts allow-forms'
 
   const debouncedPersistState = useMemo(
     () =>
@@ -162,11 +179,11 @@ export function AppIframeHost(props: AppIframeHostProps) {
   }, [invocationId, onClose])
 
   useEffect(() => {
-    if (!manifest || !iframeOrigin) {
+    if (!manifest || !iframeSrc || !iframeOrigin) {
       setStatus('error')
       setErrorMessage('App manifest is missing or has an invalid URL.')
     }
-  }, [iframeOrigin, manifest])
+  }, [iframeOrigin, iframeSrc, manifest])
 
   useEffect(() => {
     if (!isIframeReady || !stateLoaded) {
@@ -377,7 +394,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
           className="h-full w-full border-none"
           sandbox={sandbox}
           referrerPolicy="no-referrer"
-          src={manifest.url}
+          src={iframeSrc ?? undefined}
           title={`${manifest.name} app iframe`}
         />
       </Box>

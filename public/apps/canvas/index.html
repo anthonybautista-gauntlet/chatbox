@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Drawing Canvas</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #f5f6f8;
+        color: #111827;
+      }
+
+      body {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .app-shell {
+        display: flex;
+        flex: 1;
+        min-height: 100vh;
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 12px;
+        padding: 12px;
+        border: 1px solid #d0d7de;
+        border-radius: 12px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+      }
+
+      .toolbar-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .toolbar label {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .toolbar input[type="range"] {
+        width: 120px;
+      }
+
+      .toolbar button {
+        appearance: none;
+        border: 1px solid #c6ccd5;
+        border-radius: 10px;
+        background: #ffffff;
+        color: #111827;
+        padding: 8px 12px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .toolbar button:hover {
+        background: #f3f4f6;
+      }
+
+      .toolbar button.is-active {
+        border-color: #2563eb;
+        background: #dbeafe;
+        color: #1d4ed8;
+      }
+
+      .toolbar button.is-danger {
+        border-color: #f1b5b5;
+        color: #b42318;
+      }
+
+      .toolbar button.is-danger:hover {
+        background: #fef3f2;
+      }
+
+      .status {
+        margin-left: auto;
+        min-width: 180px;
+        font-size: 12px;
+        color: #6b7280;
+        text-align: right;
+      }
+
+      .canvas-card {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+        border: 1px solid #d0d7de;
+        border-radius: 12px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+        overflow: auto;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        height: auto;
+        border: 1px solid #d0d7de;
+        border-radius: 8px;
+        background: #ffffff;
+        touch-action: none;
+        user-select: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <div class="toolbar">
+        <div class="toolbar-group">
+          <label for="color-picker">Color</label>
+          <input id="color-picker" type="color" value="#000000" />
+        </div>
+
+        <div class="toolbar-group">
+          <label for="brush-size">Brush</label>
+          <input id="brush-size" type="range" min="1" max="20" step="1" value="3" />
+          <span id="brush-size-value">3px</span>
+        </div>
+
+        <div class="toolbar-group">
+          <button id="eraser-toggle" type="button">Eraser</button>
+          <button id="undo-button" type="button">Undo</button>
+          <button id="clear-button" type="button" class="is-danger">Clear</button>
+          <button id="download-button" type="button">Download</button>
+        </div>
+
+        <div id="status-text" class="status">Ready</div>
+      </div>
+
+      <div class="canvas-card">
+        <canvas id="drawing-canvas" width="600" height="400"></canvas>
+      </div>
+    </div>
+
+    <script>
+      (() => {
+        const LOGICAL_WIDTH = 600
+        const LOGICAL_HEIGHT = 400
+        const MAX_COMMANDS = 150
+        const DEFAULT_COLOR = '#000000'
+        const DEFAULT_BRUSH_SIZE = 3
+        const READY_MESSAGE = 'Canvas ready'
+
+        const canvas = document.getElementById('drawing-canvas')
+        const context = canvas.getContext('2d')
+        const colorPicker = document.getElementById('color-picker')
+        const brushSizeInput = document.getElementById('brush-size')
+        const brushSizeValue = document.getElementById('brush-size-value')
+        const eraserToggle = document.getElementById('eraser-toggle')
+        const undoButton = document.getElementById('undo-button')
+        const clearButton = document.getElementById('clear-button')
+        const downloadButton = document.getElementById('download-button')
+        const statusText = document.getElementById('status-text')
+
+        const appState = {
+          version: 1,
+          commands: [],
+          settings: {
+            color: DEFAULT_COLOR,
+            brushSize: DEFAULT_BRUSH_SIZE,
+            eraserActive: false,
+          },
+          canvasWidth: LOGICAL_WIDTH,
+          canvasHeight: LOGICAL_HEIGHT,
+        }
+
+        const appContext = {
+          appId: null,
+          parentOrigin: '*',
+          initialized: false,
+        }
+
+        let currentStroke = null
+        let activePointerId = null
+        let renderToken = 0
+
+        function setStatus(message) {
+          statusText.textContent = message
+        }
+
+        function emitMessage(type, payload) {
+          window.parent.postMessage(
+            {
+              type,
+              ...payload,
+            },
+            appContext.parentOrigin || '*',
+          )
+        }
+
+        function emitReady() {
+          emitMessage('ready', {})
+        }
+
+        function cloneStateForTransport() {
+          return {
+            version: appState.version,
+            commands: appState.commands.map((command) => JSON.parse(JSON.stringify(command))),
+            settings: { ...appState.settings },
+            canvasWidth: LOGICAL_WIDTH,
+            canvasHeight: LOGICAL_HEIGHT,
+          }
+        }
+
+        function emitStateUpdate() {
+          emitMessage('state_update', {
+            state: cloneStateForTransport(),
+          })
+        }
+
+        function syncToolbar() {
+          colorPicker.value = appState.settings.color
+          brushSizeInput.value = String(appState.settings.brushSize)
+          brushSizeValue.textContent = `${appState.settings.brushSize}px`
+          eraserToggle.classList.toggle('is-active', Boolean(appState.settings.eraserActive))
+          eraserToggle.textContent = appState.settings.eraserActive ? 'Eraser On' : 'Eraser'
+        }
+
+        function clearCanvasSurface() {
+          context.save()
+          context.globalCompositeOperation = 'source-over'
+          context.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT)
+          context.fillStyle = '#ffffff'
+          context.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT)
+          context.restore()
+        }
+
+        function isFiniteNumber(value) {
+          return typeof value === 'number' && Number.isFinite(value)
+        }
+
+        function sanitizeColor(value) {
+          return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value : DEFAULT_COLOR
+        }
+
+        function sanitizeLineWidth(value, fallback) {
+          const lineWidth = isFiniteNumber(value) ? value : fallback
+          return Math.max(1, Math.min(40, lineWidth))
+        }
+
+        function sanitizeFontSize(value) {
+          const fontSize = isFiniteNumber(value) ? value : 16
+          return Math.max(8, Math.min(96, fontSize))
+        }
+
+        function loadImage(dataUrl) {
+          return new Promise((resolve, reject) => {
+            const image = new Image()
+            image.onload = () => resolve(image)
+            image.onerror = () => reject(new Error('Failed to load snapshot image.'))
+            image.src = dataUrl
+          })
+        }
+
+        function drawPath(command) {
+          if (!Array.isArray(command.points) || command.points.length === 0) {
+            return
+          }
+
+          context.save()
+          context.lineCap = 'round'
+          context.lineJoin = 'round'
+          context.lineWidth = sanitizeLineWidth(command.lineWidth, DEFAULT_BRUSH_SIZE)
+
+          if (command.eraser) {
+            context.globalCompositeOperation = 'destination-out'
+            context.strokeStyle = 'rgba(0, 0, 0, 1)'
+          } else {
+            context.globalCompositeOperation = 'source-over'
+            context.strokeStyle = sanitizeColor(command.color)
+          }
+
+          const [startX, startY] = command.points[0]
+          context.beginPath()
+          context.moveTo(startX, startY)
+
+          for (let index = 1; index < command.points.length; index += 1) {
+            const point = command.points[index]
+            context.lineTo(point[0], point[1])
+          }
+
+          if (command.points.length === 1) {
+            context.lineTo(startX + 0.01, startY + 0.01)
+          }
+
+          context.stroke()
+          context.restore()
+        }
+
+        function drawLine(command) {
+          context.save()
+          context.strokeStyle = sanitizeColor(command.color)
+          context.lineWidth = sanitizeLineWidth(command.lineWidth, 2)
+          context.lineCap = 'round'
+          context.beginPath()
+          context.moveTo(command.x1, command.y1)
+          context.lineTo(command.x2, command.y2)
+          context.stroke()
+          context.restore()
+        }
+
+        function drawRect(command) {
+          context.save()
+          context.lineWidth = sanitizeLineWidth(command.lineWidth, 2)
+          context.strokeStyle = sanitizeColor(command.color)
+          context.fillStyle = sanitizeColor(command.color)
+          if (command.fill) {
+            context.fillRect(command.x, command.y, command.width, command.height)
+          } else {
+            context.strokeRect(command.x, command.y, command.width, command.height)
+          }
+          context.restore()
+        }
+
+        function drawCircle(command) {
+          context.save()
+          context.lineWidth = sanitizeLineWidth(command.lineWidth, 2)
+          context.strokeStyle = sanitizeColor(command.color)
+          context.fillStyle = sanitizeColor(command.color)
+          context.beginPath()
+          context.arc(command.cx, command.cy, command.radius, 0, Math.PI * 2)
+          if (command.fill) {
+            context.fill()
+          } else {
+            context.stroke()
+          }
+          context.restore()
+        }
+
+        function drawEllipse(command) {
+          context.save()
+          context.lineWidth = sanitizeLineWidth(command.lineWidth, 2)
+          context.strokeStyle = sanitizeColor(command.color)
+          context.fillStyle = sanitizeColor(command.color)
+          context.beginPath()
+          context.ellipse(command.cx, command.cy, command.rx, command.ry, 0, 0, Math.PI * 2)
+          if (command.fill) {
+            context.fill()
+          } else {
+            context.stroke()
+          }
+          context.restore()
+        }
+
+        function drawText(command) {
+          context.save()
+          context.fillStyle = sanitizeColor(command.color)
+          context.font = `${sanitizeFontSize(command.fontSize)}px sans-serif`
+          context.textBaseline = 'top'
+          context.fillText(command.text, command.x, command.y)
+          context.restore()
+        }
+
+        async function drawSnapshot(command) {
+          if (typeof command.dataUrl !== 'string' || !command.dataUrl) {
+            return
+          }
+          const image = await loadImage(command.dataUrl)
+          context.drawImage(image, 0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT)
+        }
+
+        async function renderAll() {
+          const token = ++renderToken
+          clearCanvasSurface()
+
+          for (const command of appState.commands) {
+            if (token !== renderToken) {
+              return
+            }
+
+            if (!command || typeof command !== 'object') {
+              continue
+            }
+
+            if (command.type === 'snapshot') {
+              try {
+                await drawSnapshot(command)
+              } catch (error) {
+                console.error(error)
+              }
+              continue
+            }
+
+            switch (command.type) {
+              case 'path':
+                drawPath(command)
+                break
+              case 'line':
+                drawLine(command)
+                break
+              case 'rect':
+                drawRect(command)
+                break
+              case 'circle':
+                drawCircle(command)
+                break
+              case 'ellipse':
+                drawEllipse(command)
+                break
+              case 'text':
+                drawText(command)
+                break
+              default:
+                break
+            }
+          }
+        }
+
+        function summarizeCommand(command) {
+          if (!command || typeof command !== 'object') {
+            return null
+          }
+
+          if (command.type === 'snapshot') {
+            return { type: 'snapshot' }
+          }
+
+          if (command.type === 'path') {
+            return {
+              type: 'path',
+              pointCount: Array.isArray(command.points) ? command.points.length : 0,
+              color: command.eraser ? 'eraser' : sanitizeColor(command.color),
+              lineWidth: sanitizeLineWidth(command.lineWidth, DEFAULT_BRUSH_SIZE),
+            }
+          }
+
+          const summary = { type: command.type }
+          const keys = ['x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'radius', 'rx', 'ry', 'width', 'height', 'text']
+          for (const key of keys) {
+            if (command[key] !== undefined) {
+              summary[key] = command[key]
+            }
+          }
+          return summary
+        }
+
+        async function compactCommandsIfNeeded() {
+          if (appState.commands.length <= MAX_COMMANDS) {
+            return
+          }
+
+          const snapshotCommand = {
+            type: 'snapshot',
+            dataUrl: canvas.toDataURL('image/png'),
+            source: 'system',
+          }
+          appState.commands = [snapshotCommand]
+          await renderAll()
+          setStatus('Canvas compacted for persistence')
+        }
+
+        async function commitStateChange(options) {
+          await renderAll()
+          await compactCommandsIfNeeded()
+          syncToolbar()
+          if (!options || options.emitState !== false) {
+            emitStateUpdate()
+          }
+        }
+
+        function normalizePathPoints(points) {
+          if (!Array.isArray(points)) {
+            return null
+          }
+
+          const normalized = []
+          for (const point of points) {
+            if (!Array.isArray(point) || point.length < 2) {
+              return null
+            }
+            const x = Number(point[0])
+            const y = Number(point[1])
+            if (!Number.isFinite(x) || !Number.isFinite(y)) {
+              return null
+            }
+            normalized.push([x, y])
+          }
+          return normalized.length > 0 ? normalized : null
+        }
+
+        function normalizeToolCommand(rawCommand) {
+          if (!rawCommand || typeof rawCommand !== 'object') {
+            return null
+          }
+
+          const type = rawCommand.type
+          const baseCommand = {
+            type,
+            color: sanitizeColor(rawCommand.color),
+            fill: Boolean(rawCommand.fill),
+            lineWidth: sanitizeLineWidth(rawCommand.lineWidth, 2),
+            source: 'llm',
+          }
+
+          switch (type) {
+            case 'line':
+              if ([rawCommand.x1, rawCommand.y1, rawCommand.x2, rawCommand.y2].every(isFiniteNumber)) {
+                return {
+                  ...baseCommand,
+                  x1: rawCommand.x1,
+                  y1: rawCommand.y1,
+                  x2: rawCommand.x2,
+                  y2: rawCommand.y2,
+                }
+              }
+              return null
+            case 'rect':
+              if ([rawCommand.x, rawCommand.y, rawCommand.width, rawCommand.height].every(isFiniteNumber)) {
+                return {
+                  ...baseCommand,
+                  x: rawCommand.x,
+                  y: rawCommand.y,
+                  width: rawCommand.width,
+                  height: rawCommand.height,
+                }
+              }
+              return null
+            case 'circle':
+              if ([rawCommand.cx, rawCommand.cy, rawCommand.radius].every(isFiniteNumber)) {
+                return {
+                  ...baseCommand,
+                  cx: rawCommand.cx,
+                  cy: rawCommand.cy,
+                  radius: rawCommand.radius,
+                }
+              }
+              return null
+            case 'ellipse':
+              if ([rawCommand.cx, rawCommand.cy, rawCommand.rx, rawCommand.ry].every(isFiniteNumber)) {
+                return {
+                  ...baseCommand,
+                  cx: rawCommand.cx,
+                  cy: rawCommand.cy,
+                  rx: rawCommand.rx,
+                  ry: rawCommand.ry,
+                }
+              }
+              return null
+            case 'path': {
+              const points = normalizePathPoints(rawCommand.points)
+              if (!points) {
+                return null
+              }
+              return {
+                ...baseCommand,
+                points,
+              }
+            }
+            case 'text':
+              if ([rawCommand.x, rawCommand.y].every(isFiniteNumber) && typeof rawCommand.text === 'string' && rawCommand.text) {
+                return {
+                  ...baseCommand,
+                  x: rawCommand.x,
+                  y: rawCommand.y,
+                  text: rawCommand.text,
+                  fontSize: sanitizeFontSize(rawCommand.fontSize),
+                }
+              }
+              return null
+            default:
+              return null
+          }
+        }
+
+        function normalizeState(rawState) {
+          const commands = Array.isArray(rawState && rawState.commands) ? rawState.commands.filter(Boolean) : []
+          const settings = rawState && typeof rawState === 'object' ? rawState.settings || {} : {}
+
+          return {
+            version: 1,
+            commands,
+            settings: {
+              color: sanitizeColor(settings.color),
+              brushSize: sanitizeLineWidth(settings.brushSize, DEFAULT_BRUSH_SIZE),
+              eraserActive: Boolean(settings.eraserActive),
+            },
+            canvasWidth: LOGICAL_WIDTH,
+            canvasHeight: LOGICAL_HEIGHT,
+          }
+        }
+
+        async function initializeFromState(rawState) {
+          const nextState = normalizeState(rawState)
+          appState.version = nextState.version
+          appState.commands = nextState.commands
+          appState.settings = nextState.settings
+          appState.canvasWidth = LOGICAL_WIDTH
+          appState.canvasHeight = LOGICAL_HEIGHT
+          syncToolbar()
+          await renderAll()
+          appContext.initialized = true
+          setStatus(appState.commands.length > 0 ? 'Resumed saved canvas' : READY_MESSAGE)
+        }
+
+        function getCanvasPoint(event) {
+          const rect = canvas.getBoundingClientRect()
+          const scaleX = LOGICAL_WIDTH / rect.width
+          const scaleY = LOGICAL_HEIGHT / rect.height
+          return {
+            x: Math.max(0, Math.min(LOGICAL_WIDTH, (event.clientX - rect.left) * scaleX)),
+            y: Math.max(0, Math.min(LOGICAL_HEIGHT, (event.clientY - rect.top) * scaleY)),
+          }
+        }
+
+        function beginStroke(event) {
+          if (activePointerId !== null) {
+            return
+          }
+
+          const point = getCanvasPoint(event)
+          activePointerId = event.pointerId
+          currentStroke = {
+            type: 'path',
+            points: [[point.x, point.y]],
+            color: appState.settings.color,
+            eraser: appState.settings.eraserActive,
+            lineWidth: appState.settings.brushSize,
+            fill: false,
+            source: 'user',
+          }
+          canvas.setPointerCapture(event.pointerId)
+          setStatus(appState.settings.eraserActive ? 'Erasing' : 'Drawing')
+        }
+
+        function drawStrokeSegment(previousPoint, nextPoint) {
+          context.save()
+          context.lineCap = 'round'
+          context.lineJoin = 'round'
+          context.lineWidth = appState.settings.brushSize
+
+          if (appState.settings.eraserActive) {
+            context.globalCompositeOperation = 'destination-out'
+            context.strokeStyle = 'rgba(0, 0, 0, 1)'
+          } else {
+            context.globalCompositeOperation = 'source-over'
+            context.strokeStyle = appState.settings.color
+          }
+
+          context.beginPath()
+          context.moveTo(previousPoint[0], previousPoint[1])
+          context.lineTo(nextPoint[0], nextPoint[1])
+          context.stroke()
+          context.restore()
+        }
+
+        function moveStroke(event) {
+          if (!currentStroke || activePointerId !== event.pointerId) {
+            return
+          }
+
+          const point = getCanvasPoint(event)
+          const previousPoint = currentStroke.points[currentStroke.points.length - 1]
+          const nextPoint = [point.x, point.y]
+          currentStroke.points.push(nextPoint)
+          drawStrokeSegment(previousPoint, nextPoint)
+        }
+
+        async function finishStroke(event) {
+          if (!currentStroke || activePointerId !== event.pointerId) {
+            return
+          }
+
+          if (currentStroke.points.length === 1) {
+            currentStroke.points.push([...currentStroke.points[0]])
+          }
+
+          canvas.releasePointerCapture(event.pointerId)
+          activePointerId = null
+          appState.commands.push(currentStroke)
+          currentStroke = null
+          setStatus('Stroke saved')
+          await commitStateChange({ emitState: true })
+        }
+
+        function cancelStroke(event) {
+          if (activePointerId === event.pointerId) {
+            currentStroke = null
+            activePointerId = null
+            void renderAll()
+            setStatus(READY_MESSAGE)
+          }
+        }
+
+        async function handleUndo() {
+          for (let index = appState.commands.length - 1; index >= 0; index -= 1) {
+            if (appState.commands[index] && appState.commands[index].source === 'user') {
+              appState.commands.splice(index, 1)
+              setStatus('Undid last user stroke')
+              await commitStateChange({ emitState: true })
+              return
+            }
+          }
+          setStatus('Nothing to undo')
+        }
+
+        async function handleClear() {
+          appState.commands = []
+          setStatus('Canvas cleared')
+          await commitStateChange({ emitState: true })
+        }
+
+        function saveImage(filename) {
+          const finalFilename = typeof filename === 'string' && filename.trim() ? filename.trim() : 'canvas.png'
+          const normalizedFilename = finalFilename.toLowerCase().endsWith('.png') ? finalFilename : `${finalFilename}.png`
+          const dataUrl = canvas.toDataURL('image/png')
+          const link = document.createElement('a')
+          link.href = dataUrl
+          link.download = normalizedFilename
+          link.rel = 'noopener'
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+          return normalizedFilename
+        }
+
+        function collectColorsUsed() {
+          const colors = new Set()
+          for (const command of appState.commands) {
+            if (command && typeof command.color === 'string' && !command.eraser) {
+              colors.add(sanitizeColor(command.color))
+            }
+          }
+          return Array.from(colors)
+        }
+
+        async function handleToolInvocation(toolName, args, invocationId) {
+          if (!appContext.initialized) {
+            await initializeFromState(args && args.state ? args.state : null)
+          }
+
+          try {
+            switch (toolName) {
+              case 'open_canvas': {
+                const result = {
+                  status: appState.commands.length > 0 ? 'canvas_resumed' : 'canvas_opened',
+                  commandCount: appState.commands.length,
+                  canvasWidth: LOGICAL_WIDTH,
+                  canvasHeight: LOGICAL_HEIGHT,
+                }
+                emitMessage('tool_result', { invocationId, result })
+                return
+              }
+              case 'draw_on_canvas': {
+                const commands = Array.isArray(args && args.commands) ? args.commands : []
+                const validCommands = commands.map(normalizeToolCommand).filter(Boolean)
+                if (validCommands.length > 0) {
+                  appState.commands.push(...validCommands)
+                  await commitStateChange({ emitState: true })
+                  setStatus(`Applied ${validCommands.length} drawing command${validCommands.length === 1 ? '' : 's'}`)
+                } else {
+                  setStatus('No valid drawing commands received')
+                }
+                emitMessage('tool_result', {
+                  invocationId,
+                  result: {
+                    status: 'drawn',
+                    commandsExecuted: validCommands.length,
+                  },
+                })
+                return
+              }
+              case 'get_canvas_state': {
+                emitMessage('tool_result', {
+                  invocationId,
+                  result: {
+                    commandCount: appState.commands.length,
+                    colorsUsed: collectColorsUsed(),
+                    canvasWidth: LOGICAL_WIDTH,
+                    canvasHeight: LOGICAL_HEIGHT,
+                    recentCommands: appState.commands.slice(-5).map(summarizeCommand).filter(Boolean),
+                  },
+                })
+                return
+              }
+              case 'reset_canvas': {
+                appState.commands = []
+                await commitStateChange({ emitState: true })
+                setStatus('Canvas reset')
+                emitMessage('tool_result', {
+                  invocationId,
+                  result: {
+                    status: 'cleared',
+                  },
+                })
+                return
+              }
+              case 'save_image': {
+                const savedFilename = saveImage(args && args.filename)
+                setStatus(`Downloaded ${savedFilename}`)
+                emitMessage('tool_result', {
+                  invocationId,
+                  result: {
+                    status: 'saved',
+                    filename: savedFilename,
+                  },
+                })
+                return
+              }
+              default:
+                emitMessage('error', {
+                  invocationId,
+                  code: 'unknown_tool',
+                  message: `Unknown tool: ${toolName}`,
+                })
+            }
+          } catch (error) {
+            console.error(error)
+            emitMessage('error', {
+              invocationId,
+              code: 'tool_failed',
+              message: error instanceof Error ? error.message : 'Canvas tool failed.',
+            })
+          }
+        }
+
+        colorPicker.addEventListener('input', (event) => {
+          appState.settings.color = sanitizeColor(event.target.value)
+          appState.settings.eraserActive = false
+          syncToolbar()
+        })
+
+        brushSizeInput.addEventListener('input', (event) => {
+          const nextSize = Number(event.target.value)
+          appState.settings.brushSize = sanitizeLineWidth(nextSize, DEFAULT_BRUSH_SIZE)
+          syncToolbar()
+        })
+
+        eraserToggle.addEventListener('click', () => {
+          appState.settings.eraserActive = !appState.settings.eraserActive
+          syncToolbar()
+          setStatus(appState.settings.eraserActive ? 'Eraser enabled' : 'Brush enabled')
+        })
+
+        undoButton.addEventListener('click', () => {
+          void handleUndo()
+        })
+
+        clearButton.addEventListener('click', () => {
+          void handleClear()
+        })
+
+        downloadButton.addEventListener('click', () => {
+          const filename = saveImage('canvas.png')
+          setStatus(`Downloaded ${filename}`)
+        })
+
+        canvas.addEventListener('pointerdown', (event) => {
+          beginStroke(event)
+        })
+
+        canvas.addEventListener('pointermove', (event) => {
+          moveStroke(event)
+        })
+
+        canvas.addEventListener('pointerup', (event) => {
+          void finishStroke(event)
+        })
+
+        canvas.addEventListener('pointercancel', (event) => {
+          cancelStroke(event)
+        })
+
+        canvas.addEventListener('pointerleave', (event) => {
+          if (currentStroke && activePointerId === event.pointerId && event.buttons === 0) {
+            void finishStroke(event)
+          }
+        })
+
+        window.addEventListener('message', (event) => {
+          if (!event.data || typeof event.data !== 'object' || typeof event.data.type !== 'string') {
+            return
+          }
+
+          if (appContext.parentOrigin !== '*' && event.origin !== appContext.parentOrigin) {
+            return
+          }
+
+          const message = event.data
+          if (message.type === 'ping') {
+            emitMessage('pong', { invocationId: message.invocationId })
+            return
+          }
+
+          if (message.type === 'init') {
+            appContext.appId = typeof message.appId === 'string' ? message.appId : null
+            appContext.parentOrigin = typeof message.parentOrigin === 'string' ? message.parentOrigin : '*'
+            void initializeFromState(message.state)
+            return
+          }
+
+          if (message.type === 'tool_invocation') {
+            if (typeof message.toolName !== 'string') {
+              emitMessage('error', {
+                invocationId: message.invocationId,
+                code: 'invalid_tool_name',
+                message: 'Tool invocation missing toolName.',
+              })
+              return
+            }
+
+            const initState = !appContext.initialized ? message.state : null
+            if (initState !== null) {
+              void initializeFromState(initState).then(() => {
+                void handleToolInvocation(message.toolName, message.args || {}, message.invocationId)
+              })
+              return
+            }
+
+            void handleToolInvocation(message.toolName, message.args || {}, message.invocationId)
+          }
+        })
+
+        clearCanvasSurface()
+        syncToolbar()
+        setStatus(READY_MESSAGE)
+        emitReady()
+      })()
+    </script>
+  </body>
+</html>
