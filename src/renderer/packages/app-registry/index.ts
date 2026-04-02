@@ -43,6 +43,24 @@ const registeredApps = new Map<string, AppManifest>()
 const pendingInvocations = new Map<string, PendingInvocation>()
 const liveInvocations = new Map<string, LiveAppInvocation>()
 
+interface ActiveIframeRef {
+  sendMessage: (message: Record<string, unknown>) => void
+}
+
+const activeIframeRefs = new Map<string, ActiveIframeRef>()
+
+export function registerActiveIframe(appId: string, sendMessage: (msg: Record<string, unknown>) => void) {
+  activeIframeRefs.set(appId, { sendMessage })
+}
+
+export function unregisterActiveIframe(appId: string) {
+  activeIframeRefs.delete(appId)
+}
+
+export function getActiveIframe(appId: string) {
+  return activeIframeRefs.get(appId)
+}
+
 function asSchemaRecord(value: unknown): JsonSchemaRecord | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null
@@ -168,13 +186,29 @@ function createAppTool(manifest: AppManifest, definition: ToolDefinition, sessio
         startedAt: Date.now(),
       })
 
-      void appEventBus.emit('invoke', {
-        appId: manifest.id,
-        toolName: definition.name,
-        args,
-        invocationId,
-        sessionId,
-      })
+      const activeIframe = activeIframeRefs.get(manifest.id)
+      if (activeIframe) {
+        activeIframe.sendMessage({
+          type: 'tool_invocation',
+          toolName: definition.name,
+          args,
+          invocationId,
+          state: null,
+        })
+      } else {
+        // No active iframe -- open one regardless of uiTrigger
+        liveInvocations.set(invocationId, {
+          ...liveInvocations.get(invocationId)!,
+          uiTrigger: true,
+        })
+        void appEventBus.emit('invoke', {
+          appId: manifest.id,
+          toolName: definition.name,
+          args,
+          invocationId,
+          sessionId,
+        })
+      }
 
       return await pendingPromise
     },

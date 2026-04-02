@@ -19,6 +19,8 @@ import {
   getAppById,
   getAppForTool,
   getLiveInvocation,
+  registerActiveIframe,
+  unregisterActiveIframe,
 } from '@/packages/app-registry'
 import { getLastAppState, persistAppState } from '@/packages/app-registry/state'
 
@@ -56,6 +58,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
   const [isIframeReady, setIsIframeReady] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [persistedState, setPersistedState] = useState<unknown>(null)
+  const [stateLoaded, setStateLoaded] = useState(false)
   const [status, setStatus] = useState<'loading' | 'active' | 'complete' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -90,13 +93,15 @@ export function AppIframeHost(props: AppIframeHostProps) {
 
   useEffect(() => {
     return () => {
-      debouncedPersistState.cancel()
+      debouncedPersistState.flush()
     }
   }, [debouncedPersistState])
 
   useEffect(() => {
+    setStateLoaded(false)
     if (!effectiveSessionId) {
       setPersistedState(null)
+      setStateLoaded(true)
       return
     }
 
@@ -104,6 +109,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
     void getLastAppState(effectiveSessionId, appId).then((nextState) => {
       if (!cancelled) {
         setPersistedState(nextState)
+        setStateLoaded(true)
       }
     })
 
@@ -112,15 +118,30 @@ export function AppIframeHost(props: AppIframeHostProps) {
     }
   }, [appId, effectiveSessionId, frameKey])
 
+  // Sandboxed iframes without allow-same-origin get an opaque "null" origin,
+  // so targetOrigin must be '*'. This is safe because we post to a specific
+  // contentWindow reference and validate event.source on incoming messages.
+  const needsWildcardOrigin = sandbox.indexOf('allow-same-origin') === -1
+
   const sendToIframe = useCallback(
     (message: Record<string, unknown>) => {
-      if (!iframeRef.current?.contentWindow || !iframeOrigin) {
+      if (!iframeRef.current?.contentWindow) {
         return
       }
-      iframeRef.current.contentWindow.postMessage(message, iframeOrigin)
+      const targetOrigin = needsWildcardOrigin ? '*' : (iframeOrigin ?? '*')
+      iframeRef.current.contentWindow.postMessage(message, targetOrigin)
     },
-    [iframeOrigin]
+    [iframeOrigin, needsWildcardOrigin]
   )
+
+  useEffect(() => {
+    if (isIframeReady) {
+      registerActiveIframe(appId, sendToIframe)
+    }
+    return () => {
+      unregisterActiveIframe(appId)
+    }
+  }, [appId, isIframeReady, sendToIframe])
 
   const reinitializeFrame = useCallback(() => {
     invocationSentRef.current = false
@@ -148,7 +169,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
   }, [iframeOrigin, manifest])
 
   useEffect(() => {
-    if (!isIframeReady) {
+    if (!isIframeReady || !stateLoaded) {
       return
     }
 
@@ -176,7 +197,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
       })
       invocationSentRef.current = true
     }
-  }, [appId, args, effectiveSessionId, invocationId, isIframeReady, persistedState, sendToIframe, toolName])
+  }, [appId, args, effectiveSessionId, invocationId, isIframeReady, persistedState, sendToIframe, stateLoaded, toolName])
 
   useEffect(() => {
     if (!isIframeReady) {
@@ -300,74 +321,66 @@ export function AppIframeHost(props: AppIframeHostProps) {
   }
 
   const renderFrame = (fullscreen: boolean) => (
-    <Paper withBorder radius="md" p="xs">
-      <Stack gap="xs">
-        <Group justify="space-between" align="center">
-          <Group gap="xs">
-            <Text fw={600}>{manifest.name}</Text>
-            {status === 'loading' ? (
-              <IconLoader size={16} className="animate-spin" />
-            ) : status === 'error' ? (
-              <IconAlertCircle size={16} color="var(--chatbox-tint-error)" />
-            ) : (
-              <IconCheck size={16} color="var(--chatbox-tint-success)" />
-            )}
-            <Text size="sm" c="dimmed">
-              {status === 'loading'
-                ? t('Loading')
-                : status === 'active'
-                  ? t('Active')
-                  : status === 'complete'
-                    ? t('Complete')
-                    : t('Error')}
-            </Text>
-          </Group>
-          <Group gap={4}>
-            <ActionIcon variant="subtle" onClick={reinitializeFrame} aria-label={t('Reload')}>
-              <IconRefresh size={16} />
-            </ActionIcon>
-            {!fullscreen && (
-              <ActionIcon
-                variant="subtle"
-                onClick={() => {
-                  setIsFullscreen(true)
-                  reinitializeFrame()
-                }}
-                aria-label={t('Fullscreen')}
-              >
-                <IconArrowsMaximize size={16} />
-              </ActionIcon>
-            )}
-            <ActionIcon variant="subtle" color="red" onClick={handleClose} aria-label={t('Close')}>
-              <IconX size={16} />
-            </ActionIcon>
-          </Group>
-        </Group>
-
-        {errorMessage && (
-          <Alert icon={<IconAlertCircle size={16} />} color="red" variant="light">
-            {errorMessage}
-          </Alert>
-        )}
-
-        <Box className={fullscreen ? 'h-[70vh]' : 'h-[400px]'}>
-          <iframe
-            key={`${invocationId}:${frameKey}:${fullscreen ? 'fullscreen' : 'inline'}`}
-            ref={iframeRef}
-            className="h-full w-full border-none"
-            sandbox={sandbox}
-            referrerPolicy="no-referrer"
-            src={manifest.url}
-            title={`${manifest.name} app iframe`}
-          />
-        </Box>
-
-        {liveInvocation?.status === 'result' && liveInvocation.result !== undefined && (
-          <Text size="xs" c="dimmed">
-            {t('Latest tool result is available in the message above.')}
+    <Paper withBorder radius="md" p="xs" className="h-full flex flex-col">
+      <Group justify="space-between" align="center" className="shrink-0">
+        <Group gap="xs">
+          <Text fw={600}>{manifest.name}</Text>
+          {status === 'loading' ? (
+            <IconLoader size={16} className="animate-spin" />
+          ) : status === 'error' ? (
+            <IconAlertCircle size={16} color="var(--chatbox-tint-error)" />
+          ) : (
+            <IconCheck size={16} color="var(--chatbox-tint-success)" />
+          )}
+          <Text size="sm" c="dimmed">
+            {status === 'loading'
+              ? t('Loading')
+              : status === 'active'
+                ? t('Active')
+                : status === 'complete'
+                  ? t('Complete')
+                  : t('Error')}
           </Text>
-        )}
-      </Stack>
+        </Group>
+        <Group gap={4}>
+          <ActionIcon variant="subtle" onClick={reinitializeFrame} aria-label={t('Reload')}>
+            <IconRefresh size={16} />
+          </ActionIcon>
+          {!fullscreen && (
+            <ActionIcon
+              variant="subtle"
+              onClick={() => {
+                setIsFullscreen(true)
+                reinitializeFrame()
+              }}
+              aria-label={t('Fullscreen')}
+            >
+              <IconArrowsMaximize size={16} />
+            </ActionIcon>
+          )}
+          <ActionIcon variant="subtle" color="red" onClick={handleClose} aria-label={t('Close')}>
+            <IconX size={16} />
+          </ActionIcon>
+        </Group>
+      </Group>
+
+      {errorMessage && (
+        <Alert icon={<IconAlertCircle size={16} />} color="red" variant="light" className="shrink-0 mt-1">
+          {errorMessage}
+        </Alert>
+      )}
+
+      <Box className={fullscreen ? 'h-[70vh]' : 'flex-1 min-h-0 mt-1'}>
+        <iframe
+          key={`${invocationId}:${frameKey}:${fullscreen ? 'fullscreen' : 'inline'}`}
+          ref={iframeRef}
+          className="h-full w-full border-none"
+          sandbox={sandbox}
+          referrerPolicy="no-referrer"
+          src={manifest.url}
+          title={`${manifest.name} app iframe`}
+        />
+      </Box>
     </Paper>
   )
 

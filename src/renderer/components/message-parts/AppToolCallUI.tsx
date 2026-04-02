@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Code, Collapse, Group, Paper, Stack, Text } from '@mantine/core'
+import { Box, Code, Collapse, Group, Paper, Stack, Text } from '@mantine/core'
 import type { MessageToolCallPart } from '@shared/types'
 import {
   IconChevronRight,
@@ -7,16 +7,12 @@ import {
   IconCode,
   IconLoader,
   IconTool,
-  IconX,
 } from '@tabler/icons-react'
 import clsx from 'clsx'
 import { type FC, useMemo, useState } from 'react'
-import { useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
-import { AppIframeHost } from '@/components/app/AppIframeHost'
 import { ScalableIcon } from '@/components/common/ScalableIcon'
-import { getAppForTool, isLiveInvocation } from '@/packages/app-registry'
-import { currentSessionIdAtom } from '@/stores/atoms'
+import { getAppForTool } from '@/packages/app-registry'
 
 const AppToolCallHeader: FC<{
   label: string
@@ -44,11 +40,14 @@ const AppToolCallHeader: FC<{
   )
 }
 
+function hasNonEmptyArgs(args: unknown): boolean {
+  if (!args || typeof args !== 'object') return false
+  return Object.keys(args as Record<string, unknown>).length > 0
+}
+
 export const AppToolCallUI: FC<{ part: MessageToolCallPart }> = ({ part }) => {
   const { t } = useTranslation()
-  const currentSessionId = useAtomValue(currentSessionIdAtom)
-  const [expanded, setExpanded] = useState(part.state !== 'result')
-  const [closed, setClosed] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const registration = getAppForTool(part.toolName)
 
   const label = useMemo(() => {
@@ -62,64 +61,51 @@ export const AppToolCallUI: FC<{ part: MessageToolCallPart }> = ({ part }) => {
     return null
   }
 
-  const shouldRenderIframe =
-    !closed && (part.state === 'call' || (registration.definition.uiTrigger && isLiveInvocation(part.toolCallId)))
+  const showDetails = hasNonEmptyArgs(part.args) || part.result !== undefined || part.state === 'error'
 
   return (
     <Stack gap="xs" mb="xs">
       <AppToolCallHeader label={label} state={part.state} expanded={expanded} onToggle={() => setExpanded((prev) => !prev)} />
 
-      {shouldRenderIframe && (
-        <Stack gap="xs">
-          <Group justify="flex-end">
-            <ActionIcon variant="subtle" color="gray" onClick={() => setClosed(true)} aria-label={t('Close')}>
-              <IconX size={16} />
-            </ActionIcon>
-          </Group>
-          <AppIframeHost
-            appId={registration.appId}
-            toolName={registration.toolName}
-            args={part.args}
-            invocationId={part.toolCallId}
-            sessionId={currentSessionId}
-            onClose={() => setClosed(true)}
-          />
-        </Stack>
+      {showDetails && (
+        <Collapse in={expanded}>
+          <Paper withBorder radius="md" p="sm">
+            <Stack gap="xs">
+              {hasNonEmptyArgs(part.args) && (
+                <>
+                  <Group gap="xs" c="chatbox-tertiary">
+                    <ScalableIcon icon={IconCode} />
+                    <Text fw={600} size="xs" c="chatbox-tertiary" m="0">
+                      {t('Arguments')}
+                    </Text>
+                  </Group>
+                  <Box>
+                    <Code block>{JSON.stringify(part.args, null, 2)}</Code>
+                  </Box>
+                </>
+              )}
+              {part.result !== undefined && (
+                <>
+                  <Group gap="xs" c="chatbox-tertiary">
+                    <ScalableIcon icon={IconTool} />
+                    <Text fw={600} size="xs" c="chatbox-tertiary" m="0">
+                      {t('Result')}
+                    </Text>
+                  </Group>
+                  <Box>
+                    <Code block>{JSON.stringify(part.result, null, 2)}</Code>
+                  </Box>
+                </>
+              )}
+              {part.state === 'error' && (
+                <Text size="sm" c="red">
+                  {t('The app tool reported an error.')}
+                </Text>
+              )}
+            </Stack>
+          </Paper>
+        </Collapse>
       )}
-
-      <Collapse in={expanded}>
-        <Paper withBorder radius="md" p="sm">
-          <Stack gap="xs">
-            <Group gap="xs" c="chatbox-tertiary">
-              <ScalableIcon icon={IconCode} />
-              <Text fw={600} size="xs" c="chatbox-tertiary" m="0">
-                {t('Arguments')}
-              </Text>
-            </Group>
-            <Box>
-              <Code block>{JSON.stringify(part.args, null, 2)}</Code>
-            </Box>
-            {part.result !== undefined && (
-              <>
-                <Group gap="xs" c="chatbox-tertiary">
-                  <ScalableIcon icon={IconTool} />
-                  <Text fw={600} size="xs" c="chatbox-tertiary" m="0">
-                    {t('Result')}
-                  </Text>
-                </Group>
-                <Box>
-                  <Code block>{JSON.stringify(part.result, null, 2)}</Code>
-                </Box>
-              </>
-            )}
-            {part.state === 'error' && (
-              <Text size="sm" c="red">
-                {t('The app tool reported an error.')}
-              </Text>
-            )}
-          </Stack>
-        </Paper>
-      </Collapse>
     </Stack>
   )
 }

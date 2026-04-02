@@ -720,5 +720,7 @@ export function getAllMessageList(s: Session) {
   if (s.messages) {
     messageContext = messageContext.concat(s.messages)
   }
-  return messageContext
+  return messageContext.filter(
+    (msg) => !(msg.role === 'system' && msg.name?.startsWith('chatbridge-app-state:'))
+  )
 }

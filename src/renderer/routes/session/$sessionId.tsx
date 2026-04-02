@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { useStore } from 'zustand'
 import MessageList, { type MessageListRef } from '@/components/chat/MessageList'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
+import { ActiveAppPanel } from '@/components/app/ActiveAppPanel'
 import InputBox from '@/components/InputBox/InputBox'
 import Header from '@/components/layout/Header'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
@@ -155,9 +156,10 @@ function RouteComponent() {
       <Header session={currentSession} />
 
       {/* MessageList 设置 key，确保每个 session 对应新的 MessageList 实例 */}
-      <MessageList ref={messageListRef} key={`message-list${currentSessionId}`} currentSession={currentSession} />
+      <MessageList ref={messageListRef} key={`message-list${currentSessionId}`} currentSession={currentSession} className="min-h-0 flex-1" />
 
-      {/* <ScrollButtons /> */}
+      <ActiveAppPanel />
+
       <ErrorBoundary name="session-inputbox">
         <InputBox
           key={`input-box${currentSession.id}`}
