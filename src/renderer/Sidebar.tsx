@@ -14,6 +14,7 @@ import { useNavigate } from '@tanstack/react-router'
 import clsx from 'clsx'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import AppLauncher from './components/app/AppLauncher'
 import Divider from './components/common/Divider'
 import { ScalableIcon } from './components/common/ScalableIcon'
 import ThemeSwitchButton from './components/dev/ThemeSwitchButton'
@@ -170,6 +171,21 @@ export default function Sidebar() {
         </Flex>
 
         <SessionList sessionListViewportRef={sessionListViewportRef} />
+
+        {isWebApp && (
+          <Stack gap={0}>
+            <Box px="xs">
+              <Divider />
+            </Box>
+            <AppLauncher
+              onAppLaunched={() => {
+                if (isSmallScreen) {
+                  setShowSidebar(false)
+                }
+              }}
+            />
+          </Stack>
+        )}
 
         <Stack gap={0} px="xs" pb="xs">
           <Divider />

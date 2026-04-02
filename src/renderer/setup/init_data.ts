@@ -1,6 +1,6 @@
 import { chatSessionSettings } from '@shared/defaults'
 import type { Session } from '@shared/types'
-import { defaultSessionsForCN, defaultSessionsForEN } from '@/packages/initial_data'
+import { defaultExampleSessionIds, defaultSessionsForCN, defaultSessionsForEN } from '@/packages/initial_data'
 import platform from '@/platform'
 import storage from '@/storage'
 import { StorageKey, StorageKeyGenerator } from '@/storage/StoreStorage'
@@ -8,8 +8,31 @@ import * as chatStore from '@/stores/chatStore'
 import { lastUsedModelStore } from '@/stores/lastUsedModelStore'
 import { getSessionMeta } from '@/stores/sessionHelpers'
 
+const WEB_DEFAULT_SESSION_CLEANUP_KEY = 'chatbridge:web-default-session-cleanup:v1'
+
 export async function initData() {
+  await cleanupDefaultSessions()
   await initSessionsIfNeeded()
+}
+
+async function cleanupDefaultSessions() {
+  if ((process.env.CHATBOX_BUILD_PLATFORM || 'unknown') !== 'web') {
+    return
+  }
+
+  const alreadyCleaned = await storage.getItem<boolean>(WEB_DEFAULT_SESSION_CLEANUP_KEY, false)
+  if (alreadyCleaned) {
+    return
+  }
+
+  const sessionList = await chatStore.listSessionsMeta()
+  const sessionsToDelete = sessionList.filter((session) => defaultExampleSessionIds.has(session.id))
+
+  for (const session of sessionsToDelete) {
+    await chatStore.deleteSession(session.id)
+  }
+
+  await storage.setItemNow(WEB_DEFAULT_SESSION_CLEANUP_KEY, true)
 }
 
 async function initSessionsIfNeeded() {

@@ -39,6 +39,7 @@ import './setup/protect'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { initLastUsedModelStore } from './stores/lastUsedModelStore'
 import { initSettingsStore } from './stores/settingsStore'
+import { initData } from './setup/init_data'
 
 // 开发环境下引入错误测试工具
 // if (process.env.NODE_ENV === 'development') {
@@ -60,6 +61,7 @@ async function initializeApp() {
   try {
     // 数据迁移
     await migration.migrate()
+    await initData()
     log.info('migrate done')
   } catch (e) {
     log.error('migrate error', e)

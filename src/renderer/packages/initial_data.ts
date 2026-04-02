@@ -1032,3 +1032,7 @@ mindmap
 
 defaultSessionsForCN.unshift(imageCreatorSessionForCN, artifactSessionCN, mermaidSessionCN)
 defaultSessionsForEN.unshift(imageCreatorSessionForEN, artifactSessionEN, mermaidSessionEN)
+
+export const defaultExampleSessionIds = new Set(
+  [...defaultSessionsForEN, ...defaultSessionsForCN].map((session) => session.id)
+)
