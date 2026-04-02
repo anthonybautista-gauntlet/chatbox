@@ -8,6 +8,7 @@ import { useStore } from 'zustand'
 import MessageList, { type MessageListRef } from '@/components/chat/MessageList'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { ActiveAppPanel } from '@/components/app/ActiveAppPanel'
+import { HiddenAppRunners } from '@/components/app/HiddenAppRunners'
 import InputBox from '@/components/InputBox/InputBox'
 import Header from '@/components/layout/Header'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
@@ -159,6 +160,7 @@ function RouteComponent() {
       <MessageList ref={messageListRef} key={`message-list${currentSessionId}`} currentSession={currentSession} className="min-h-0 flex-1" />
 
       <ActiveAppPanel />
+      <HiddenAppRunners />
 
       <ErrorBoundary name="session-inputbox">
         <InputBox

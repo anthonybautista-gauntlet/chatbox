@@ -218,11 +218,6 @@ function createAppTool(manifest: AppManifest, definition: ToolDefinition, sessio
           state: null,
         })
       } else {
-        // No active iframe -- open one regardless of uiTrigger
-        liveInvocations.set(invocationId, {
-          ...liveInvocations.get(invocationId)!,
-          uiTrigger: true,
-        })
         void appEventBus.emit('invoke', {
           appId: manifest.id,
           toolName: definition.name,
