@@ -7,9 +7,7 @@ export const JsonSchemaSchema = z.record(z.string(), z.unknown())
 export type JsonSchema = z.infer<typeof JsonSchemaSchema>
 
 export const AppAuthSchema = z.object({
-  type: z.literal('oauth2'),
-  authorizationUrl: z.string().min(1),
-  tokenUrl: z.string().min(1),
+  provider: z.string().min(1),
   scopes: z.array(z.string()).default([]),
 })
 export type AppAuth = z.infer<typeof AppAuthSchema>

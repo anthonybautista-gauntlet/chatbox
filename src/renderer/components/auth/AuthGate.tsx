@@ -20,6 +20,7 @@ import {
   useSupabaseInitialized,
 } from '@/stores/supabaseAuthStore'
 import { isSupabaseConfigured } from '@/lib/supabase'
+import { loadRemoteApps } from '@/packages/app-registry'
 import platform from '@/platform'
 
 interface AuthGateProps {
@@ -60,6 +61,12 @@ function AuthGateInner({ children }: AuthGateProps) {
   useEffect(() => {
     supabaseAuthStore.getState().initialize()
   }, [])
+
+  useEffect(() => {
+    if (session) {
+      void loadRemoteApps()
+    }
+  }, [session])
 
   if (loading || !initialized) {
     return (

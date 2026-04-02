@@ -1,8 +1,8 @@
 import { Loader, NavLink, Stack, Text, ThemeIcon } from '@mantine/core'
 import { createMessage } from '@shared/types'
 import { IconApps } from '@tabler/icons-react'
-import { useMemo, useState } from 'react'
-import { getRegisteredApps } from '@/packages/app-registry'
+import { useSyncExternalStore, useState } from 'react'
+import { subscribeToRegistry, getRegistrySnapshot } from '@/packages/app-registry'
 import * as chatStore from '@/stores/chatStore'
 import { submitNewUserMessage } from '@/stores/session/messages'
 import { initEmptyChatSession } from '@/stores/sessionHelpers'
@@ -14,7 +14,7 @@ interface AppLauncherProps {
 }
 
 export default function AppLauncher({ onAppLaunched }: AppLauncherProps) {
-  const apps = useMemo(() => getRegisteredApps(), [])
+  const apps = useSyncExternalStore(subscribeToRegistry, getRegistrySnapshot)
   const [launchingAppId, setLaunchingAppId] = useState<string | null>(null)
 
   if (CHATBOX_BUILD_PLATFORM !== 'web' || apps.length === 0) {

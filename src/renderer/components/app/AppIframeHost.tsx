@@ -1,4 +1,4 @@
-import { Alert, ActionIcon, Box, Group, Paper, Stack, Text } from '@mantine/core'
+import { Alert, ActionIcon, Box, Button, Group, Paper, Stack, Text } from '@mantine/core'
 import { useAtomValue } from 'jotai'
 import { debounce } from 'lodash'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -8,11 +8,14 @@ import {
   IconArrowsMaximize,
   IconCheck,
   IconLoader,
+  IconLock,
   IconRefresh,
   IconX,
 } from '@tabler/icons-react'
 import { Modal } from '@/components/layout/Overlay'
 import { currentSessionIdAtom } from '@/stores/atoms'
+import { supabaseAuthStore } from '@/stores/supabaseAuthStore'
+import { VITE_SUPABASE_URL } from '@/variables'
 import {
   appEventBus,
   deactivateInvocation,
@@ -20,6 +23,9 @@ import {
   getAppForTool,
   getLiveInvocation,
   registerActiveIframe,
+  suspendInvocationForAuth,
+  resumeInvocationAfterAuth,
+  failInvocationAuth,
   unregisterActiveIframe,
 } from '@/packages/app-registry'
 import { getLastAppState, persistAppState } from '@/packages/app-registry/state'
@@ -31,6 +37,7 @@ type AppIframeMessage =
   | { type: 'tool_result'; invocationId?: string; result: unknown; state?: unknown }
   | { type: 'completion'; summary?: string; data?: unknown; state?: unknown }
   | { type: 'error'; invocationId?: string; code?: string; message?: string }
+  | { type: 'auth_required'; provider: string; scopes?: string[]; message?: string }
 
 export interface AppIframeHostProps {
   appId: string
@@ -61,6 +68,9 @@ export function AppIframeHost(props: AppIframeHostProps) {
   const [stateLoaded, setStateLoaded] = useState(false)
   const [status, setStatus] = useState<'loading' | 'active' | 'complete' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [authPending, setAuthPending] = useState(false)
+  const [authProvider, setAuthProvider] = useState<string | null>(null)
+  const authPopupRef = useRef<Window | null>(null)
 
   const manifest = getAppById(appId)
   const toolRegistration = getAppForTool(`${appId}.${toolName}`)
@@ -140,15 +150,133 @@ export function AppIframeHost(props: AppIframeHostProps) {
   // contentWindow reference and validate event.source on incoming messages.
   const needsWildcardOrigin = sandbox.indexOf('allow-same-origin') === -1
 
+  const reinitializeFrame = useCallback(() => {
+    invocationSentRef.current = false
+    missedPingsRef.current = 0
+    setIsIframeReady(false)
+    setStatus('loading')
+    setErrorMessage(null)
+    setFrameKey((current) => current + 1)
+  }, [])
+
+  const handleIframeLoad = useCallback(() => {
+    // Any iframe document load (including self-navigation/reload inside the app)
+    // means the app lost in-memory state and must re-run the ready/init/invocation handshake.
+    invocationSentRef.current = false
+    missedPingsRef.current = 0
+    setIsIframeReady(false)
+    setStatus('loading')
+    setErrorMessage(null)
+  }, [])
+
+  const handleClose = useCallback(() => {
+    deactivateInvocation(invocationId)
+    void appEventBus.emit('cancel', {
+      invocationId,
+      reason: 'Closed by user',
+    })
+    onClose?.()
+  }, [invocationId, onClose])
+
+  const handleAuthorize = useCallback(() => {
+    const token = supabaseAuthStore.getState().getAccessToken()
+    if (!token || !VITE_SUPABASE_URL) return
+
+    const origin = window.location.origin
+    const url = `${VITE_SUPABASE_URL}/functions/v1/oauth-broker?action=start&app_id=${encodeURIComponent(appId)}&token=${encodeURIComponent(token)}&origin=${encodeURIComponent(origin)}`
+    authPopupRef.current = window.open(url, '_blank', 'width=500,height=700,popup=yes')
+  }, [appId])
+
+  const fetchOAuthCredentials = useCallback(async () => {
+    if (manifest?.type !== 'external_authenticated' || !VITE_SUPABASE_URL) {
+      return null
+    }
+
+    const token = supabaseAuthStore.getState().getAccessToken()
+    if (!token) {
+      return null
+    }
+
+    try {
+      const res = await fetch(`${VITE_SUPABASE_URL}/functions/v1/oauth-broker?action=token&app_id=${encodeURIComponent(appId)}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!res.ok) {
+        return null
+      }
+
+      const data = (await res.json()) as {
+        access_token?: string
+        expires_at?: string | null
+        scopes?: string[] | null
+      }
+
+      if (!data.access_token) {
+        return null
+      }
+
+      return {
+        accessToken: data.access_token,
+        expiresAt: data.expires_at ?? null,
+        scopes: Array.isArray(data.scopes) ? data.scopes : [],
+      }
+    } catch {
+      return null
+    }
+  }, [appId, manifest?.type])
+
+  const buildInvocationArgs = useCallback(
+    async (baseArgs: unknown) => {
+      const credentials = await fetchOAuthCredentials()
+      if (!credentials) {
+        return baseArgs
+      }
+
+      const mergedArgs = isObjectLike(baseArgs) ? baseArgs : {}
+      return {
+        ...mergedArgs,
+        accessToken: credentials.accessToken,
+        oauth: {
+          provider: manifest?.auth?.provider ?? authProvider ?? undefined,
+          accessToken: credentials.accessToken,
+          expiresAt: credentials.expiresAt,
+          scopes: credentials.scopes,
+        },
+      }
+    },
+    [authProvider, fetchOAuthCredentials, manifest?.auth?.provider]
+  )
+
   const sendToIframe = useCallback(
     (message: Record<string, unknown>) => {
       if (!iframeRef.current?.contentWindow) {
         return
       }
-      const targetOrigin = needsWildcardOrigin ? '*' : (iframeOrigin ?? '*')
-      iframeRef.current.contentWindow.postMessage(message, targetOrigin)
+
+      const post = (nextMessage: Record<string, unknown>) => {
+        const targetOrigin = needsWildcardOrigin ? '*' : (iframeOrigin ?? '*')
+        iframeRef.current?.contentWindow?.postMessage(nextMessage, targetOrigin)
+      }
+
+      if (
+        message.type === 'tool_invocation' &&
+        !(isObjectLike(message.args) && typeof message.args.accessToken === 'string')
+      ) {
+        void buildInvocationArgs(message.args).then((invocationArgs) => {
+          post({
+            ...message,
+            args: invocationArgs,
+          })
+        })
+        return
+      }
+
+      post(message)
     },
-    [iframeOrigin, needsWildcardOrigin]
+    [buildInvocationArgs, iframeOrigin, needsWildcardOrigin]
   )
 
   useEffect(() => {
@@ -160,23 +288,85 @@ export function AppIframeHost(props: AppIframeHostProps) {
     }
   }, [appId, isIframeReady, sendToIframe])
 
-  const reinitializeFrame = useCallback(() => {
-    invocationSentRef.current = false
-    missedPingsRef.current = 0
-    setIsIframeReady(false)
-    setStatus('loading')
-    setErrorMessage(null)
-    setFrameKey((current) => current + 1)
-  }, [])
+  const handleOAuthComplete = useCallback(
+    async (oauthData: { appId?: string; success?: boolean; error?: string }) => {
+      if (oauthData.appId && oauthData.appId !== appId) return false
 
-  const handleClose = useCallback(() => {
-    deactivateInvocation(invocationId)
-    void appEventBus.emit('cancel', {
-      invocationId,
-      reason: 'Closed by user',
-    })
-    onClose?.()
-  }, [invocationId, onClose])
+      setAuthPending(false)
+      setAuthProvider(null)
+
+      if (oauthData.success) {
+        const credentials = await fetchOAuthCredentials()
+        if (!credentials) {
+          failInvocationAuth(invocationId)
+          sendToIframe({
+            type: 'auth_result',
+            success: false,
+            provider: authProvider || '',
+            error: 'Authorization completed, but no app token could be retrieved.',
+          })
+          return true
+        }
+
+        const invocationArgs = await buildInvocationArgs(args)
+        resumeInvocationAfterAuth(invocationId)
+        sendToIframe({
+          type: 'auth_result',
+          success: true,
+          provider: authProvider || '',
+          accessToken: credentials.accessToken,
+          expiresAt: credentials.expiresAt,
+          scopes: credentials.scopes,
+        })
+        sendToIframe({
+          type: 'tool_invocation',
+          toolName,
+          args: invocationArgs,
+          invocationId,
+          state: persistedState,
+        })
+      } else {
+        failInvocationAuth(invocationId)
+        sendToIframe({
+          type: 'auth_result',
+          success: false,
+          provider: authProvider || '',
+          error: oauthData.error || 'Authorization was cancelled',
+        })
+      }
+      return true
+    },
+    [appId, args, authProvider, buildInvocationArgs, fetchOAuthCredentials, invocationId, persistedState, sendToIframe, toolName]
+  )
+
+  useEffect(() => {
+    if (!authPending) return
+
+    let settled = false
+
+    const settle = (data: { appId?: string; success?: boolean; error?: string }) => {
+      if (settled) return
+      settled = true
+      try { localStorage.removeItem('chatbox-oauth-result') } catch { /* noop */ }
+      void handleOAuthComplete(data)
+    }
+
+    const pollId = window.setInterval(() => {
+      if (settled) return
+      try {
+        const raw = localStorage.getItem('chatbox-oauth-result')
+        if (!raw) return
+        const data = JSON.parse(raw) as { type?: string; appId?: string; success?: boolean; error?: string }
+        if (data.type === 'oauth_complete') {
+          settle(data)
+        }
+      } catch { /* noop */ }
+    }, 500)
+
+    return () => {
+      window.clearInterval(pollId)
+    }
+  }, [authPending, handleOAuthComplete])
 
   useEffect(() => {
     if (!manifest || !iframeSrc || !iframeOrigin) {
@@ -205,16 +395,28 @@ export function AppIframeHost(props: AppIframeHostProps) {
     })
 
     if (!invocationSentRef.current) {
-      sendToIframe({
-        type: 'tool_invocation',
-        toolName,
-        args,
-        invocationId,
-        state: persistedState,
+      let cancelled = false
+
+      void buildInvocationArgs(args).then((invocationArgs) => {
+        if (cancelled || invocationSentRef.current) {
+          return
+        }
+
+        sendToIframe({
+          type: 'tool_invocation',
+          toolName,
+          args: invocationArgs,
+          invocationId,
+          state: persistedState,
+        })
+        invocationSentRef.current = true
       })
-      invocationSentRef.current = true
+
+      return () => {
+        cancelled = true
+      }
     }
-  }, [appId, args, effectiveSessionId, invocationId, isIframeReady, persistedState, sendToIframe, stateLoaded, toolName])
+  }, [appId, args, buildInvocationArgs, effectiveSessionId, invocationId, isIframeReady, persistedState, sendToIframe, stateLoaded, toolName])
 
   useEffect(() => {
     if (!isIframeReady) {
@@ -280,6 +482,8 @@ export function AppIframeHost(props: AppIframeHostProps) {
           void debouncedPersistState(data.state)
           return
         case 'tool_result':
+          setAuthPending(false)
+          setAuthProvider(null)
           if (data.state !== undefined) {
             setPersistedState(data.state)
             void debouncedPersistState(data.state)
@@ -291,6 +495,8 @@ export function AppIframeHost(props: AppIframeHostProps) {
           })
           return
         case 'completion':
+          setAuthPending(false)
+          setAuthProvider(null)
           if (data.state !== undefined) {
             setPersistedState(data.state)
             if (effectiveSessionId) {
@@ -304,6 +510,29 @@ export function AppIframeHost(props: AppIframeHostProps) {
               result: data.data,
             })
           }
+          return
+        case 'auth_required':
+          void (async () => {
+            const credentials = await fetchOAuthCredentials()
+            if (credentials) {
+              setAuthPending(false)
+              setAuthProvider(null)
+              resumeInvocationAfterAuth(invocationId)
+              sendToIframe({
+                type: 'auth_result',
+                success: true,
+                provider: data.provider,
+                accessToken: credentials.accessToken,
+                expiresAt: credentials.expiresAt,
+                scopes: credentials.scopes,
+              })
+              return
+            }
+
+            setAuthPending(true)
+            setAuthProvider(data.provider)
+            suspendInvocationForAuth(invocationId)
+          })()
           return
         case 'error': {
           const message = data.message || 'App execution failed.'
@@ -327,7 +556,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
     return () => {
       window.removeEventListener('message', handleMessage)
     }
-  }, [appId, debouncedPersistState, effectiveSessionId, iframeOrigin, invocationId])
+  }, [appId, debouncedPersistState, effectiveSessionId, fetchOAuthCredentials, iframeOrigin, invocationId, sendToIframe])
 
   if (!manifest || !toolRegistration) {
     return (
@@ -387,6 +616,17 @@ export function AppIframeHost(props: AppIframeHostProps) {
         </Alert>
       )}
 
+      {authPending && (
+        <Alert icon={<IconLock size={16} />} color="blue" variant="light" className="shrink-0 mt-1">
+          <Group gap="sm" align="center">
+            <Text size="sm">This app requires authorization with {authProvider ?? 'an external provider'}.</Text>
+            <Button size="xs" leftSection={<IconLock size={14} />} onClick={handleAuthorize}>
+              Authorize {authProvider}
+            </Button>
+          </Group>
+        </Alert>
+      )}
+
       <Box className={fullscreen ? 'h-[70vh]' : 'flex-1 min-h-0 mt-1'}>
         <iframe
           key={`${invocationId}:${frameKey}:${fullscreen ? 'fullscreen' : 'inline'}`}
@@ -396,6 +636,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
           referrerPolicy="no-referrer"
           src={iframeSrc ?? undefined}
           title={`${manifest.name} app iframe`}
+          onLoad={handleIframeLoad}
         />
       </Box>
     </Paper>

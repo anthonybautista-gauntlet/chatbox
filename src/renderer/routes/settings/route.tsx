@@ -1,6 +1,7 @@
 import { ActionIcon, Box, Flex, Indicator, Stack, Text } from '@mantine/core'
 import {
   IconAdjustmentsHorizontal,
+  IconApps,
   IconBook,
   IconBox,
   IconCategory,
@@ -102,6 +103,15 @@ const ITEMS = [
     label: 'General Settings',
     icon: <IconAdjustmentsHorizontal className="w-full h-full" />,
   },
+  ...(isWebApp
+    ? [
+        {
+          key: 'apps',
+          label: 'App Registry',
+          icon: <IconApps className="w-full h-full" />,
+        },
+      ]
+    : []),
 ]
 
 export const Route = createFileRoute('/settings')({

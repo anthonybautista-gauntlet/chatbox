@@ -28,6 +28,7 @@
     "release",
     ".erb/dll",
     "ios",
-    "android"
+    "android",
+    "apps"
   ]
 }

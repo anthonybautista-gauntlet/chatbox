@@ -31,6 +31,7 @@ import { RouteComponent as SettingsProviderChatboxAiRouteComponent } from '@/rou
 import { RouteComponent as SettingsProviderIndexRouteComponent } from '@/routes/settings/provider/index'
 import { RouteComponent as SettingsProviderRouteRouteComponent } from '@/routes/settings/provider/route'
 import { SettingsRoot } from '@/routes/settings/route'
+import { RouteComponent as SettingsAppsRouteComponent } from '@/routes/settings/apps'
 import { RouteComponent as SettingsWebSearchRouteComponent } from '@/routes/settings/web-search'
 
 export type SettingsModalProps = {}
@@ -189,6 +190,12 @@ const SettingsDefaultModelsRoute = createRoute({
   getParentRoute: () => RootRoute,
 })
 
+const SettingsAppsRoute = createRoute({
+  component: SettingsAppsRouteComponent,
+  path: '/settings/apps',
+  getParentRoute: () => RootRoute,
+})
+
 const SettingsProviderRouteRoute = createRoute({
   component: SettingsProviderRouteRouteComponent,
   path: '/settings/provider',
@@ -230,6 +237,7 @@ const routeTree = RootRoute.addChildren([
   SettingsDocumentParserRoute,
   SettingsHotkeysRoute,
   SettingsDefaultModelsRoute,
+  SettingsAppsRoute,
   SettingsProviderRouteRoute,
 ])
 

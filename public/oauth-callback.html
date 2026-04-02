@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Authorization Complete</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: #f8f9fa;
+      color: #1a1a2e;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+      padding: 48px 40px;
+      text-align: center;
+      max-width: 420px;
+      width: 90%;
+    }
+    .icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .icon.success { background: #e6f9ed; }
+    .icon.error { background: #fde8e8; }
+    .icon svg { width: 32px; height: 32px; }
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    p {
+      color: #6b7280;
+      font-size: 15px;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+    button {
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 32px;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover { background: #4338ca; }
+    .closing { color: #9ca3af; font-size: 13px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="icon success" id="status-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    </div>
+    <h1 id="title">Authorization Successful</h1>
+    <p id="message">Your account has been connected. This window will close automatically.</p>
+    <button onclick="window.close()">Close Window</button>
+    <div class="closing" id="closing-note"></div>
+  </div>
+
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var success = params.get('success') === 'true';
+      var appId = params.get('app_id') || '';
+      var error = params.get('error') || '';
+
+      var icon = document.getElementById('status-icon');
+      var title = document.getElementById('title');
+      var message = document.getElementById('message');
+
+      if (!success) {
+        icon.className = 'icon error';
+        icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+        title.textContent = 'Authorization Failed';
+        message.textContent = error
+          ? 'Error: ' + decodeURIComponent(error) + '. You can close this window and try again.'
+          : 'Something went wrong. You can close this window and try again.';
+      }
+
+      var payload = JSON.stringify({
+        type: 'oauth_complete',
+        appId: appId,
+        success: success,
+        error: error || undefined,
+        ts: Date.now()
+      });
+
+      try { localStorage.setItem('chatbox-oauth-result', payload); } catch (e) {}
+
+      try {
+        var channel = new BroadcastChannel('chatbox-oauth-result');
+        channel.postMessage(JSON.parse(payload));
+        channel.close();
+      } catch (e) {}
+
+      if (success) {
+        var note = document.getElementById('closing-note');
+        var seconds = 3;
+        note.textContent = 'Closing in ' + seconds + 's\u2026';
+        var timer = setInterval(function () {
+          seconds--;
+          if (seconds <= 0) {
+            clearInterval(timer);
+            window.close();
+          } else {
+            note.textContent = 'Closing in ' + seconds + 's\u2026';
+          }
+        }, 1000);
+      }
+    })();
+  </script>
+</body>
+</html>

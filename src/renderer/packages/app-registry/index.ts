@@ -7,6 +7,7 @@ import {
   type JsonSchema,
   type ToolDefinition,
 } from '@shared/types'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { appEventBus } from './event-bus'
 import { defaultApps } from './manifests'
 
@@ -32,7 +33,7 @@ export interface LiveAppInvocation {
   args: unknown
   sessionId?: string
   uiTrigger: boolean
-  status: 'pending' | 'result' | 'error' | 'cancelled'
+  status: 'pending' | 'result' | 'error' | 'cancelled' | 'awaiting_auth'
   result?: unknown
   error?: { message: string; code?: string }
   startedAt: number
@@ -40,8 +41,29 @@ export interface LiveAppInvocation {
 }
 
 const registeredApps = new Map<string, AppManifest>()
+const remoteAppIds = new Set<string>()
 const pendingInvocations = new Map<string, PendingInvocation>()
 const liveInvocations = new Map<string, LiveAppInvocation>()
+
+type RegistryListener = () => void
+const registryListeners = new Set<RegistryListener>()
+let registrySnapshot: AppManifest[] = []
+
+function notifyRegistryChange() {
+  registrySnapshot = Array.from(registeredApps.values())
+  for (const listener of registryListeners) {
+    listener()
+  }
+}
+
+export function subscribeToRegistry(listener: RegistryListener): () => void {
+  registryListeners.add(listener)
+  return () => registryListeners.delete(listener)
+}
+
+export function getRegistrySnapshot(): AppManifest[] {
+  return registrySnapshot
+}
 
 interface ActiveIframeRef {
   sendMessage: (message: Record<string, unknown>) => void
@@ -274,9 +296,11 @@ appEventBus.on('cancel', ({ invocationId, reason }) => {
   })
 })
 
-export function registerApp(manifest: AppManifest) {
+export function registerApp(manifest: AppManifest, remote = false) {
   const parsedManifest = AppManifestSchema.parse(manifest)
   registeredApps.set(parsedManifest.id, parsedManifest)
+  if (remote) remoteAppIds.add(parsedManifest.id)
+  notifyRegistryChange()
   return parsedManifest
 }
 
@@ -333,10 +357,79 @@ export function deactivateInvocation(invocationId: string) {
   liveInvocations.delete(invocationId)
 }
 
+export function suspendInvocationForAuth(invocationId: string) {
+  const pending = pendingInvocations.get(invocationId)
+  if (pending) {
+    clearTimeout(pending.timeoutId)
+  }
+  const live = liveInvocations.get(invocationId)
+  if (live) {
+    liveInvocations.set(invocationId, { ...live, status: 'awaiting_auth' })
+  }
+}
+
+export function resumeInvocationAfterAuth(invocationId: string) {
+  const pending = pendingInvocations.get(invocationId)
+  if (pending) {
+    const definition = registeredApps.get(pending.appId)?.tools.find((t) => t.name === pending.toolName)
+    const timeoutMs = definition?.timeoutMs ?? 30_000
+    pending.timeoutId = createInvocationTimeout(invocationId, timeoutMs)
+  }
+  const live = liveInvocations.get(invocationId)
+  if (live) {
+    liveInvocations.set(invocationId, { ...live, status: 'pending' })
+  }
+}
+
+export function failInvocationAuth(invocationId: string) {
+  settleInvocation(invocationId, 'error', {
+    error: { message: 'Authorization failed or was cancelled', code: 'auth_failed' },
+  })
+}
+
 export function getRegisteredApps() {
   return Array.from(registeredApps.values())
 }
 
 for (const manifest of defaultApps) {
   registerApp(manifest)
+}
+
+export async function loadRemoteApps(): Promise<void> {
+  if (!isSupabaseConfigured) return
+
+  const { data, error } = await supabase
+    .from('app_registrations')
+    .select('manifest')
+    .eq('status', 'APPROVED')
+
+  if (error || !data) return
+
+  const freshRemoteIds = new Set<string>()
+
+  for (const row of data) {
+    const manifest = row.manifest as AppManifest
+    if (!manifest?.id) continue
+    freshRemoteIds.add(manifest.id)
+    if (registeredApps.has(manifest.id)) continue
+    try {
+      registerApp(manifest, true)
+    } catch {
+      // skip invalid manifests
+    }
+  }
+
+  let changed = false
+  for (const id of remoteAppIds) {
+    if (!freshRemoteIds.has(id)) {
+      registeredApps.delete(id)
+      remoteAppIds.delete(id)
+      changed = true
+    }
+  }
+  if (changed) notifyRegistryChange()
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('focus', () => void loadRemoteApps())
 }
