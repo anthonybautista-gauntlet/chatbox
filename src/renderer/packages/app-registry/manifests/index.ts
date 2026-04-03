@@ -14,7 +14,7 @@ export const chessAppManifest: AppManifest = {
     {
       name: 'start_game',
       description:
-        'Open or show the chess board UI. ALWAYS use this tool when the user says "open chess", "show the board", "play chess", "let me see the game", or any request to display the chess interface. Do NOT pass playerColor or difficulty unless the user explicitly states a preference. If a game is already in progress it will be resumed automatically. This is the ONLY tool that opens the visual chess board. If the status is "existing_game_resumed", do NOT ask about color or difficulty — the game is already configured.',
+        'Open or show the chess board UI. ALWAYS use this tool when the user says "open chess", "show the board", "play chess", "let me see the game", or any request to display the chess interface. Do NOT pass playerColor or difficulty unless the user explicitly states a preference. If a game is already in progress it will be resumed automatically. This is the ONLY tool that opens the visual chess board. If the status is "existing_game_resumed", do NOT ask about color or difficulty — the game is already configured. If you did NOT pass playerColor or difficulty, the app is showing a setup screen — tell the user to pick their color and difficulty in the app UI. Do NOT assume they are playing white or any specific difficulty.',
       parameters: {
         type: 'object',
         properties: {

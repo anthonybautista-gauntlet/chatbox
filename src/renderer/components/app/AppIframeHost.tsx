@@ -65,6 +65,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
   const missedPingsRef = useRef(0)
   const sendToIframeRef = useRef<(message: Record<string, unknown>) => void>(() => {})
   const pendingIframeInvocationsRef = useRef<string[]>([])
+  const appInitializedRef = useRef<{ resolve: () => void; promise: Promise<void> } | null>(null)
 
   const [frameKey, setFrameKey] = useState(0)
   const [isIframeReady, setIsIframeReady] = useState(false)
@@ -424,13 +425,20 @@ export function AppIframeHost(props: AppIframeHostProps) {
     if (!invocationSentRef.current) {
       let cancelled = false
 
+      // Create a gate that resolves when the app signals it has
+      // finished initializing (via state_update) or after a timeout.
+      let resolveGate: () => void
+      const gatePromise = new Promise<void>((r) => { resolveGate = r })
+      const gateTimeout = setTimeout(resolveGate!, 2000)
+      appInitializedRef.current = { resolve: resolveGate!, promise: gatePromise }
+
       const sendInvocation = async () => {
         const invocationArgs = await buildInvocationArgs(args)
         if (cancelled || invocationSentRef.current) return
 
-        // Allow the app to process the init message and hydrate persisted
-        // state before we send the first tool invocation.
-        await new Promise((r) => setTimeout(r, 150))
+        // Wait for the app to send state_update (indicating data is
+        // loaded) or fall back after 2 s so we don't hang forever.
+        await gatePromise
         if (cancelled || invocationSentRef.current) return
 
         pendingIframeInvocationsRef.current.push(invocationId)
@@ -447,6 +455,8 @@ export function AppIframeHost(props: AppIframeHostProps) {
 
       return () => {
         cancelled = true
+        clearTimeout(gateTimeout)
+        appInitializedRef.current = null
       }
     }
   }, [appId, args, buildInvocationArgs, effectiveSessionId, invocationId, isIframeReady, persistedState, sendToIframe, stateLoaded, toolName])
@@ -528,6 +538,10 @@ export function AppIframeHost(props: AppIframeHostProps) {
           setPersistedState(data.state)
           if (initSentRef.current) {
             void debouncedPersistState(data.state)
+          }
+          if (appInitializedRef.current) {
+            appInitializedRef.current.resolve()
+            appInitializedRef.current = null
           }
           return
         case 'tool_result': {
