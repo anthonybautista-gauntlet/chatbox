@@ -34,6 +34,7 @@ type AppIframeMessage =
   | { type: 'ready' }
   | { type: 'pong' }
   | { type: 'state_update'; state: unknown }
+  | { type: 'context_response'; requestId?: string; state?: unknown }
   | { type: 'tool_result'; invocationId?: string; result: unknown; state?: unknown }
   | { type: 'completion'; summary?: string; data?: unknown; state?: unknown }
   | { type: 'error'; invocationId?: string; code?: string; message?: string }
@@ -70,7 +71,11 @@ export function AppIframeHost(props: AppIframeHostProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [authPending, setAuthPending] = useState(false)
   const [authProvider, setAuthProvider] = useState<string | null>(null)
+  const [closing, setClosing] = useState(false)
   const authPopupRef = useRef<Window | null>(null)
+  const persistedStateRef = useRef<unknown>(null)
+  const closeRequestIdRef = useRef<string | null>(null)
+  const closeRequestResolverRef = useRef<(() => void) | null>(null)
 
   const manifest = getAppById(appId)
   const toolRegistration = getAppForTool(`${appId}.${toolName}`)
@@ -117,6 +122,10 @@ export function AppIframeHost(props: AppIframeHostProps) {
       }, 500),
     [appId, effectiveSessionId]
   )
+
+  useEffect(() => {
+    persistedStateRef.current = persistedState
+  }, [persistedState])
 
   useEffect(() => {
     return () => {
@@ -170,13 +179,57 @@ export function AppIframeHost(props: AppIframeHostProps) {
   }, [])
 
   const handleClose = useCallback(() => {
-    deactivateInvocation(invocationId)
-    void appEventBus.emit('cancel', {
-      invocationId,
-      reason: 'Closed by user',
+    const finalizeClose = async () => {
+      try {
+        if (effectiveSessionId) {
+          debouncedPersistState.flush()
+          if (persistedStateRef.current !== undefined && persistedStateRef.current !== null) {
+            await persistAppState(effectiveSessionId, appId, persistedStateRef.current)
+          }
+        }
+      } finally {
+        closeRequestIdRef.current = null
+        closeRequestResolverRef.current = null
+        deactivateInvocation(invocationId)
+        void appEventBus.emit('cancel', {
+          invocationId,
+          reason: 'Closed by user',
+        })
+        setClosing(false)
+        onClose?.()
+      }
+    }
+
+    if (closing) {
+      return
+    }
+
+    setClosing(true)
+
+    if (!isIframeReady || !iframeRef.current?.contentWindow) {
+      void finalizeClose()
+      return
+    }
+
+    const requestId = crypto.randomUUID()
+    closeRequestIdRef.current = requestId
+
+    const waitForState = new Promise<void>((resolve) => {
+      closeRequestResolverRef.current = resolve
     })
-    onClose?.()
-  }, [invocationId, onClose])
+
+    sendToIframe({
+      type: 'context_request',
+      requestId,
+    })
+
+    void Promise.race([
+      waitForState,
+      new Promise<void>((resolve) => window.setTimeout(resolve, 400)),
+    ]).finally(() => {
+      void finalizeClose()
+    })
+  }, [appId, closing, debouncedPersistState, effectiveSessionId, invocationId, isIframeReady, onClose, sendToIframe])
 
   const handleAuthorize = useCallback(() => {
     const token = supabaseAuthStore.getState().getAccessToken()
@@ -480,6 +533,24 @@ export function AppIframeHost(props: AppIframeHostProps) {
         case 'state_update':
           setPersistedState(data.state)
           void debouncedPersistState(data.state)
+          if (closeRequestResolverRef.current) {
+            closeRequestResolverRef.current()
+            closeRequestResolverRef.current = null
+            closeRequestIdRef.current = null
+          }
+          return
+        case 'context_response':
+          if (data.requestId && data.requestId === closeRequestIdRef.current && data.state !== undefined) {
+            setPersistedState(data.state)
+            if (effectiveSessionId) {
+              void persistAppState(effectiveSessionId, appId, data.state).catch(console.error)
+            }
+          }
+          if (closeRequestResolverRef.current) {
+            closeRequestResolverRef.current()
+            closeRequestResolverRef.current = null
+            closeRequestIdRef.current = null
+          }
           return
         case 'tool_result':
           setAuthPending(false)
@@ -487,6 +558,11 @@ export function AppIframeHost(props: AppIframeHostProps) {
           if (data.state !== undefined) {
             setPersistedState(data.state)
             void debouncedPersistState(data.state)
+            if (closeRequestResolverRef.current) {
+              closeRequestResolverRef.current()
+              closeRequestResolverRef.current = null
+              closeRequestIdRef.current = null
+            }
           }
           setStatus('active')
           void appEventBus.emit('result', {
@@ -501,6 +577,11 @@ export function AppIframeHost(props: AppIframeHostProps) {
             setPersistedState(data.state)
             if (effectiveSessionId) {
               void persistAppState(effectiveSessionId, appId, data.state).catch(console.error)
+            }
+            if (closeRequestResolverRef.current) {
+              closeRequestResolverRef.current()
+              closeRequestResolverRef.current = null
+              closeRequestIdRef.current = null
             }
           }
           setStatus('complete')
@@ -604,7 +685,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
               <IconArrowsMaximize size={16} />
             </ActionIcon>
           )}
-          <ActionIcon variant="subtle" color="red" onClick={handleClose} aria-label={t('Close')}>
+          <ActionIcon variant="subtle" color="red" onClick={handleClose} aria-label={t('Close')} loading={closing}>
             <IconX size={16} />
           </ActionIcon>
         </Group>
