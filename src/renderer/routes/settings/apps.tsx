@@ -47,9 +47,16 @@ export function RouteComponent() {
   const [success, setSuccess] = useState<string | null>(null)
 
   const fetchSubmissions = useCallback(async () => {
+    const userId = supabaseAuthStore.getState().user?.id
+    if (!userId) {
+      setLoading(false)
+      return
+    }
+
     const { data } = await supabase
       .from('app_registrations')
       .select('id, app_id, status, review_notes, created_at, manifest')
+      .eq('submitted_by', userId)
       .order('created_at', { ascending: false })
 
     if (data) {
