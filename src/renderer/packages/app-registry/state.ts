@@ -43,7 +43,13 @@ export function formatAppStateForContext(appId: string, state: unknown, savedAt 
   return serializeEnvelope(buildEnvelope(appId, state, savedAt))
 }
 
+let activePersist: Promise<unknown> | null = null
+
 export async function getLastAppState(sessionId: string, appId: string) {
+  if (activePersist) {
+    await activePersist.catch(() => {})
+  }
+
   const session = await chatStore.getSession(sessionId)
   if (!session) {
     return null
@@ -77,7 +83,7 @@ export async function persistAppState(sessionId: string, appId: string, state: u
   nextMessage.timestamp = savedAt
   nextMessage.updatedAt = savedAt
 
-  await chatStore.updateSessionWithMessages(sessionId, (session) => {
+  const persist = chatStore.updateSessionWithMessages(sessionId, (session) => {
     const messageIndex = session.messages.findIndex(
       (message) => message.role === 'system' && message.name === messageName
     )
@@ -94,6 +100,15 @@ export async function persistAppState(sessionId: string, appId: string, state: u
       messages: session.messages.map((message, index) => (index === messageIndex ? { ...message, ...nextMessage } : message)),
     }
   })
+
+  activePersist = persist
+  try {
+    await persist
+  } finally {
+    if (activePersist === persist) {
+      activePersist = null
+    }
+  }
 
   return state
 }
