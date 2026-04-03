@@ -10,6 +10,7 @@ import {
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { appEventBus } from './event-bus'
 import { defaultApps } from './manifests'
+import { getLastAppState } from './state'
 
 export { appEventBus } from './event-bus'
 
@@ -217,6 +218,12 @@ function createAppTool(manifest: AppManifest, definition: ToolDefinition, sessio
           invocationId,
           state: null,
         })
+      } else if (!definition.uiTrigger && sessionId) {
+        const persisted = await getLastAppState(sessionId, manifest.id)
+        clearTimeout(pendingInvocations.get(invocationId)?.timeoutId)
+        pendingInvocations.delete(invocationId)
+        liveInvocations.delete(invocationId)
+        return persisted ?? { error: 'No app state found. The app must be opened first.' }
       } else {
         void appEventBus.emit('invoke', {
           appId: manifest.id,

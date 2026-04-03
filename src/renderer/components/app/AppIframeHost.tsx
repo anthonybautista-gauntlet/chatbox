@@ -123,7 +123,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
     return () => {
       debouncedPersistState.flush()
     }
-  }, [debouncedPersistState])
+  }, [appId, debouncedPersistState])
 
   useEffect(() => {
     setStateLoaded(false)
@@ -178,7 +178,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
       reason: 'Closed by user',
     })
     onClose?.()
-  }, [debouncedPersistState, invocationId, onClose])
+  }, [appId, debouncedPersistState, invocationId, onClose])
 
   const handleAuthorize = useCallback(() => {
     const token = supabaseAuthStore.getState().getAccessToken()
@@ -494,9 +494,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
           setAuthProvider(null)
           if (data.state !== undefined) {
             setPersistedState(data.state)
-            if (effectiveSessionId) {
-              void persistAppState(effectiveSessionId, appId, data.state).catch(console.error)
-            }
+            void debouncedPersistState(data.state)
           }
           setStatus('active')
           void appEventBus.emit('result', {
