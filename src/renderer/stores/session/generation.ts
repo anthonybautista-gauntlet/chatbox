@@ -24,6 +24,7 @@ import {
   MAX_INLINE_FILE_LINES,
   PREVIEW_LINES,
 } from '@/packages/context-management/attachment-payload'
+import { APP_STATE_MESSAGE_PREFIX } from '@/packages/app-registry/state'
 import { generateImage, streamText } from '@/packages/model-calls'
 import { getModelDisplayName } from '@/packages/model-setting-utils'
 import { estimateTokensFromMessages } from '@/packages/token'
@@ -548,6 +549,24 @@ export async function genMessageContext(
   if (head) {
     prompts = [head, ...prompts]
   }
+
+  // Ensure the latest app state messages survive context truncation.
+  // Walk the full (pre-truncated) message list to find the newest state per app,
+  // then append any that are missing from the collected prompts.
+  const promptIds = new Set(prompts.map((m) => m.id))
+  const latestAppStates = new Map<string, Message>()
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (m.role === 'system' && m.name?.startsWith(APP_STATE_MESSAGE_PREFIX) && !latestAppStates.has(m.name)) {
+      latestAppStates.set(m.name, m)
+    }
+  }
+  for (const stateMsg of latestAppStates.values()) {
+    if (!promptIds.has(stateMsg.id)) {
+      prompts.push(stateMsg)
+    }
+  }
+
   return prompts
 }
 

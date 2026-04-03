@@ -1,7 +1,13 @@
 import { Box } from '@mantine/core'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAtomValue } from 'jotai'
-import { appEventBus, getLiveInvocation, type LiveAppInvocation } from '@/packages/app-registry'
+import {
+  appEventBus,
+  deactivateInvocation,
+  getLiveInvocation,
+  unregisterActiveIframe,
+  type LiveAppInvocation,
+} from '@/packages/app-registry'
 import { currentSessionIdAtom } from '@/stores/atoms'
 import { AppIframeHost } from './AppIframeHost'
 
@@ -18,14 +24,26 @@ export function ActiveAppPanel() {
   const dragging = useRef(false)
   const startY = useRef(0)
   const startHeight = useRef(0)
+  const activeInvocationRef = useRef<LiveAppInvocation | null>(null)
+  activeInvocationRef.current = activeInvocation
 
   useEffect(() => {
     const handleInvoke = (event: { appId: string; invocationId: string }) => {
       const live = getLiveInvocation(event.invocationId)
-      if (live?.uiTrigger) {
-        setActiveInvocation(live)
-        setDismissed(false)
+      if (!live?.uiTrigger) return
+
+      const prev = activeInvocationRef.current
+      if (prev && prev.invocationId !== live.invocationId) {
+        unregisterActiveIframe(prev.appId)
+        deactivateInvocation(prev.invocationId)
+        void appEventBus.emit('cancel', {
+          invocationId: prev.invocationId,
+          reason: 'Replaced by another app',
+        })
       }
+
+      setActiveInvocation(live)
+      setDismissed(false)
     }
 
     const unsubscribe = appEventBus.on('invoke', handleInvoke)

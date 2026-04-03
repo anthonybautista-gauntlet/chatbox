@@ -2,7 +2,7 @@ import { createMessage } from '@shared/types'
 import * as chatStore from '@/stores/chatStore'
 
 const APP_STATE_TAG = 'CHATBRIDGE_APP_STATE'
-const APP_STATE_MESSAGE_PREFIX = 'chatbridge-app-state:'
+export const APP_STATE_MESSAGE_PREFIX = 'chatbridge-app-state:'
 
 interface PersistedAppStateEnvelope {
   appId: string

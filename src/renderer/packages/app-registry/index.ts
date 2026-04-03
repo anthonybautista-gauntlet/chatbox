@@ -3,12 +3,14 @@ import { z } from 'zod'
 import {
   AppManifestSchema,
   getNamespacedAppToolName,
+  parseNamespacedAppToolName,
   type AppManifest,
   type JsonSchema,
   type ToolDefinition,
 } from '@shared/types'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { appEventBus } from './event-bus'
+import { enrichChessToolResult } from './chess-enrichment'
 import { defaultApps } from './manifests'
 import { getLastAppState } from './state'
 
@@ -223,7 +225,7 @@ function createAppTool(manifest: AppManifest, definition: ToolDefinition, sessio
         clearTimeout(pendingInvocations.get(invocationId)?.timeoutId)
         pendingInvocations.delete(invocationId)
         liveInvocations.delete(invocationId)
-        return persisted ?? { error: 'No app state found. The app must be opened first.' }
+        return enrichChessToolResult(persisted) ?? { error: 'No app state found. The app must be opened first.' }
       } else {
         void appEventBus.emit('invoke', {
           appId: manifest.id,
@@ -234,7 +236,7 @@ function createAppTool(manifest: AppManifest, definition: ToolDefinition, sessio
         })
       }
 
-      return await pendingPromise
+      return enrichChessToolResult(await pendingPromise)
     },
   })
 }
@@ -311,28 +313,27 @@ export function getAppById(id: string) {
 }
 
 export function getAppForTool(namespacedToolName: string) {
-  const [appId, ...toolNameParts] = namespacedToolName.split('.')
-  if (!appId || toolNameParts.length === 0) {
-    return null
+  let parsed = parseNamespacedAppToolName(namespacedToolName)
+
+  // Backward compat: old tool names used '.' as separator (e.g. "chess.start_game")
+  if (!parsed && namespacedToolName.includes('.')) {
+    const dotIdx = namespacedToolName.indexOf('.')
+    parsed = {
+      appId: namespacedToolName.slice(0, dotIdx),
+      toolName: namespacedToolName.slice(dotIdx + 1),
+    }
   }
 
+  if (!parsed) return null
+
+  const { appId, toolName } = parsed
   const manifest = registeredApps.get(appId)
-  if (!manifest) {
-    return null
-  }
+  if (!manifest) return null
 
-  const toolName = toolNameParts.join('.')
   const definition = manifest.tools.find((toolDefinition) => toolDefinition.name === toolName)
-  if (!definition) {
-    return null
-  }
+  if (!definition) return null
 
-  return {
-    manifest,
-    definition,
-    appId,
-    toolName,
-  }
+  return { manifest, definition, appId, toolName }
 }
 
 export function getAppToolsForSession(sessionId?: string): ToolSet {
@@ -345,6 +346,26 @@ export function getAppToolsForSession(sessionId?: string): ToolSet {
   }
 
   return tools
+}
+
+export function getAppToolsSystemPrompt(): string {
+  if (registeredApps.size === 0) return ''
+
+  const appSummaries: string[] = []
+  for (const manifest of registeredApps.values()) {
+    const uiTools = manifest.tools.filter((t) => t.uiTrigger).map((t) => t.name)
+    const readTools = manifest.tools.filter((t) => !t.uiTrigger).map((t) => t.name)
+    let summary = `- "${manifest.name}" (id: ${manifest.id}): ${manifest.description}`
+    if (uiTools.length > 0) {
+      summary += `\n  Tools that OPEN the UI: ${uiTools.join(', ')}. Use these when the user wants to see, open, show, or interact with the app.`
+    }
+    if (readTools.length > 0) {
+      summary += `\n  Read-only tools (no UI): ${readTools.join(', ')}. Use these only for querying state or data without opening the UI.`
+    }
+    appSummaries.push(summary)
+  }
+
+  return `\n## Integrated Apps\nYou have access to the following apps via tool calls. Pay close attention to which tools open a UI and which are read-only:\n${appSummaries.join('\n')}\n\nIMPORTANT:\n- When the user asks to "open", "show", "play", or "launch" an app, ALWAYS use the UI-opening tool (uiTrigger). Do NOT use a read-only tool when the user wants to see the app interface.\n- When a tool result includes _moveDescription, use it verbatim for last-move attribution. Do NOT try to interpret PGN or FEN yourself.\n- Do NOT render ASCII chess boards. The user already has the visual board in the app UI.\n- AMBIGUOUS REQUESTS: Words like "draw" can map to multiple apps (Drawing Canvas vs chess draw). Default to the most common/creative meaning (Drawing Canvas), NOT a destructive game action. If genuinely uncertain, ask the user to clarify before invoking any tool.\n- DESTRUCTIVE ACTIONS: Never resign a game, reset a game, or clear a canvas without explicit unambiguous intent from the user. When in doubt, confirm first.\n`
 }
 
 export function getLiveInvocation(invocationId: string) {
@@ -391,6 +412,16 @@ export function failInvocationAuth(invocationId: string) {
 
 export function getRegisteredApps() {
   return Array.from(registeredApps.values())
+}
+
+export function requestAppContext(appId: string): string {
+  const requestId = crypto.randomUUID()
+  void appEventBus.emit('context_request', { appId, requestId })
+  return requestId
+}
+
+export function hydrateAppState(appId: string, state: unknown): void {
+  void appEventBus.emit('hydrate_state', { appId, state })
 }
 
 for (const manifest of defaultApps) {

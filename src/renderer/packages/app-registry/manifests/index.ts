@@ -14,7 +14,7 @@ export const chessAppManifest: AppManifest = {
     {
       name: 'start_game',
       description:
-        'Open the chess board. Do NOT pass playerColor or difficulty unless the user explicitly states a preference. The app has its own selection UI. If a game is already in progress it will be resumed automatically.',
+        'Open or show the chess board UI. ALWAYS use this tool when the user says "open chess", "show the board", "play chess", "let me see the game", or any request to display the chess interface. Do NOT pass playerColor or difficulty unless the user explicitly states a preference. If a game is already in progress it will be resumed automatically. This is the ONLY tool that opens the visual chess board. If the status is "existing_game_resumed", do NOT ask about color or difficulty — the game is already configured.',
       parameters: {
         type: 'object',
         properties: {
@@ -37,7 +37,7 @@ export const chessAppManifest: AppManifest = {
           status: { type: 'string', enum: ['new_game_started', 'existing_game_resumed'] },
           playerColor: { type: 'string' },
           difficulty: { type: 'string' },
-          fen: { type: 'string' },
+          fen: { type: 'string', description: 'FEN string of current position.' },
           moveCount: { type: 'number' },
           gameStatus: { type: 'string' },
         },
@@ -49,7 +49,7 @@ export const chessAppManifest: AppManifest = {
     {
       name: 'get_game_state',
       description:
-        'Return the current chess game state. ALWAYS call this before giving move advice, analysis, or answering questions about the position. Never rely on previously fetched state — the user may have made moves since then.',
+        'Read-only query that returns the current chess game state WITHOUT opening the board UI. Use this ONLY for answering questions about the game position, giving move advice, or analysis. This does NOT open or show the chess board — use start_game for that. Never rely on previously fetched state — the user may have made moves since then. The response includes a _moveDescription field with accurate last-move attribution — always use it instead of trying to parse the PGN yourself. Do NOT render an ASCII chess board — the user already has the visual board.',
       parameters: {
         type: 'object',
         properties: {},
@@ -58,15 +58,32 @@ export const chessAppManifest: AppManifest = {
       returns: {
         type: 'object',
         properties: {
-          fen: { type: 'string' },
-          pgn: { type: 'string' },
-          gameStatus: { type: 'string' },
-          turn: { type: 'string' },
-          playerColor: { type: 'string' },
+          fen: { type: 'string', description: 'FEN string of the current board position.' },
+          pgn: {
+            type: 'string',
+            description:
+              'PGN move history. Use this to determine each player\'s moves. Odd-numbered moves (1., 2., 3...) are White\'s, the response after each is Black\'s.',
+          },
+          gameStatus: { type: 'string', description: '"in_progress", "checkmate", "stalemate", or "draw".' },
+          turn: {
+            type: 'string',
+            description: '"white" or "black" — whose turn it is NOW (i.e. who moves next).',
+          },
+          playerColor: {
+            type: 'string',
+            description: 'The color the human user is playing as ("white" or "black").',
+          },
           difficulty: { type: 'string' },
-          moveCount: { type: 'number' },
+          moveCount: {
+            type: 'number',
+            description: 'Total number of full moves played so far.',
+          },
           isCheck: { type: 'boolean' },
-          lastMove: { type: 'string' },
+          lastMoveUci: {
+            type: 'string',
+            description:
+              'The last move made in the game in UCI format (e.g. "e2e4"). This is the most recent move by EITHER player — not necessarily the human\'s move. To find the human\'s last move, check the PGN: if playerColor is "white", look at White\'s last numbered move; if "black", look at Black\'s last reply.',
+          },
         },
         required: ['fen', 'pgn', 'gameStatus', 'turn', 'playerColor', 'difficulty', 'moveCount'],
       },
@@ -95,7 +112,7 @@ export const chessAppManifest: AppManifest = {
     {
       name: 'resign_game',
       description:
-        'Resign the current game on behalf of the player. Only use when the user explicitly asks to resign or give up.',
+        'Resign the current game on behalf of the player. This is a DESTRUCTIVE and IRREVERSIBLE action — only use when the user explicitly says "resign", "forfeit", or "I give up". NEVER call this for ambiguous phrases like "draw" (which may mean sketching on the Drawing Canvas) or "quit" (which may mean closing the board). When in doubt, ask the user to confirm before resigning.',
       parameters: {
         type: 'object',
         properties: {},
@@ -120,7 +137,7 @@ export const canvasAppManifest: AppManifest = {
   name: 'Drawing Canvas',
   version: '0.1.0',
   description:
-    'A bundled drawing canvas that supports freehand user drawing and structured drawing commands from the assistant.',
+    'A bundled drawing canvas for sketching and illustration. When the user says "draw", "sketch", "paint", "doodle", or "I want to draw", this app is almost always what they mean — not a chess draw.',
   type: 'internal',
   url: '/apps/canvas/index.html',
   permissions: [],
@@ -129,7 +146,7 @@ export const canvasAppManifest: AppManifest = {
     {
       name: 'open_canvas',
       description:
-        'Open the drawing canvas. If a previous drawing exists it will be resumed automatically. Do NOT call this before draw_on_canvas because the canvas opens automatically for any tool.',
+        'Open the drawing canvas for sketching, painting, or illustration. Use this when the user says "draw", "sketch", "paint", "doodle", "open canvas", or "I want to draw". If a previous drawing exists it will be resumed automatically.',
       parameters: {
         type: 'object',
         properties: {},

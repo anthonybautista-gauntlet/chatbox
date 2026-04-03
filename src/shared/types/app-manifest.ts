@@ -37,6 +37,17 @@ export const AppManifestSchema = z.object({
 })
 export type AppManifest = z.infer<typeof AppManifestSchema>
 
+const TOOL_NAME_SEPARATOR = '__'
+
 export function getNamespacedAppToolName(appId: string, toolName: string) {
-  return `${appId}.${toolName}`
+  return `${appId}${TOOL_NAME_SEPARATOR}${toolName}`
+}
+
+export function parseNamespacedAppToolName(namespacedToolName: string) {
+  const idx = namespacedToolName.indexOf(TOOL_NAME_SEPARATOR)
+  if (idx === -1) return null
+  const appId = namespacedToolName.slice(0, idx)
+  const toolName = namespacedToolName.slice(idx + TOOL_NAME_SEPARATOR.length)
+  if (!appId || !toolName) return null
+  return { appId, toolName }
 }

@@ -23,11 +23,23 @@ export interface AppCancelEvent {
   reason?: string
 }
 
+export interface AppContextRequestEvent {
+  appId: string
+  requestId: string
+}
+
+export interface AppHydrateStateEvent {
+  appId: string
+  state: unknown
+}
+
 export interface AppRegistryEvents {
   invoke: AppInvokeEvent
   result: AppResultEvent
   error: AppErrorEvent
   cancel: AppCancelEvent
+  context_request: AppContextRequestEvent
+  hydrate_state: AppHydrateStateEvent
 }
 
 export const appEventBus = new Emittery<AppRegistryEvents>()

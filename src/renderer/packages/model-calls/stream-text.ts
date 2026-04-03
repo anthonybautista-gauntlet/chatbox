@@ -36,7 +36,7 @@ import {
 import fileToolSet from './toolsets/file'
 import { getToolSet } from './toolsets/knowledge-base'
 import websearchToolSet, { parseLinkTool, webSearchTool } from './toolsets/web-search'
-import { getAppToolsForSession } from '../app-registry'
+import { getAppToolsForSession, getAppToolsSystemPrompt } from '../app-registry'
 
 /**
  * 处理搜索结果并返回模型响应的通用函数
@@ -174,6 +174,11 @@ export async function streamText(
   }
   if (webBrowsing && !webNotSupported) {
     toolSetInstructions += websearchToolSet.description
+  }
+
+  const isWebApp = (process.env.CHATBOX_BUILD_PLATFORM || 'unknown') === 'web'
+  if (isWebApp) {
+    toolSetInstructions += getAppToolsSystemPrompt()
   }
 
   params.messages = injectModelSystemPrompt(

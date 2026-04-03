@@ -28,6 +28,7 @@ import {
   failInvocationAuth,
   unregisterActiveIframe,
 } from '@/packages/app-registry'
+import { getNamespacedAppToolName } from '@shared/types'
 import { getLastAppState, persistAppState } from '@/packages/app-registry/state'
 
 type AppIframeMessage =
@@ -38,6 +39,7 @@ type AppIframeMessage =
   | { type: 'completion'; summary?: string; data?: unknown; state?: unknown }
   | { type: 'error'; invocationId?: string; code?: string; message?: string }
   | { type: 'auth_required'; provider: string; scopes?: string[]; message?: string }
+  | { type: 'context_response'; requestId: string; state: unknown }
 
 export interface AppIframeHostProps {
   appId: string
@@ -61,6 +63,8 @@ export function AppIframeHost(props: AppIframeHostProps) {
   const invocationSentRef = useRef(false)
   const initSentRef = useRef(false)
   const missedPingsRef = useRef(0)
+  const sendToIframeRef = useRef<(message: Record<string, unknown>) => void>(() => {})
+  const pendingIframeInvocationsRef = useRef<string[]>([])
 
   const [frameKey, setFrameKey] = useState(0)
   const [isIframeReady, setIsIframeReady] = useState(false)
@@ -74,7 +78,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
   const authPopupRef = useRef<Window | null>(null)
 
   const manifest = getAppById(appId)
-  const toolRegistration = getAppForTool(`${appId}.${toolName}`)
+  const toolRegistration = getAppForTool(getNamespacedAppToolName(appId, toolName))
   const liveInvocation = getLiveInvocation(invocationId)
 
   const iframeSrc = useMemo(() => {
@@ -153,6 +157,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
 
   const reinitializeFrame = useCallback(() => {
     invocationSentRef.current = false
+    initSentRef.current = false
     missedPingsRef.current = 0
     setIsIframeReady(false)
     setStatus('loading')
@@ -161,24 +166,13 @@ export function AppIframeHost(props: AppIframeHostProps) {
   }, [])
 
   const handleIframeLoad = useCallback(() => {
-    // Any iframe document load (including self-navigation/reload inside the app)
-    // means the app lost in-memory state and must re-run the ready/init/invocation handshake.
     invocationSentRef.current = false
+    initSentRef.current = false
     missedPingsRef.current = 0
     setIsIframeReady(false)
     setStatus('loading')
     setErrorMessage(null)
   }, [])
-
-  const handleClose = useCallback(() => {
-    debouncedPersistState.flush()
-    deactivateInvocation(invocationId)
-    void appEventBus.emit('cancel', {
-      invocationId,
-      reason: 'Closed by user',
-    })
-    onClose?.()
-  }, [appId, debouncedPersistState, invocationId, onClose])
 
   const handleAuthorize = useCallback(() => {
     const token = supabaseAuthStore.getState().getAccessToken()
@@ -259,8 +253,15 @@ export function AppIframeHost(props: AppIframeHostProps) {
       }
 
       const post = (nextMessage: Record<string, unknown>) => {
+        const envelope: Record<string, unknown> = {
+          protocolVersion: '1.0',
+          appId,
+          requestId: crypto.randomUUID(),
+          timestamp: Date.now(),
+          ...nextMessage,
+        }
         const targetOrigin = needsWildcardOrigin ? '*' : (iframeOrigin ?? '*')
-        iframeRef.current?.contentWindow?.postMessage(nextMessage, targetOrigin)
+        iframeRef.current?.contentWindow?.postMessage(envelope, targetOrigin)
       }
 
       if (
@@ -278,17 +279,37 @@ export function AppIframeHost(props: AppIframeHostProps) {
 
       post(message)
     },
-    [buildInvocationArgs, iframeOrigin, needsWildcardOrigin]
+    [appId, buildInvocationArgs, iframeOrigin, needsWildcardOrigin]
   )
+
+  const handleClose = useCallback(() => {
+    debouncedPersistState.flush()
+    unregisterActiveIframe(appId)
+    sendToIframe({ type: 'cancel', invocationId })
+    deactivateInvocation(invocationId)
+    void appEventBus.emit('cancel', {
+      invocationId,
+      reason: 'Closed by user',
+    })
+    onClose?.()
+  }, [appId, debouncedPersistState, invocationId, onClose, sendToIframe])
+
+  sendToIframeRef.current = sendToIframe
 
   useEffect(() => {
     if (isIframeReady) {
-      registerActiveIframe(appId, sendToIframe)
+      const stableProxy = (msg: Record<string, unknown>) => {
+        if (msg.type === 'tool_invocation' && typeof msg.invocationId === 'string') {
+          pendingIframeInvocationsRef.current.push(msg.invocationId)
+        }
+        sendToIframeRef.current(msg)
+      }
+      registerActiveIframe(appId, stableProxy)
     }
     return () => {
       unregisterActiveIframe(appId)
     }
-  }, [appId, isIframeReady, sendToIframe])
+  }, [appId, isIframeReady])
 
   const handleOAuthComplete = useCallback(
     async (oauthData: { appId?: string; success?: boolean; error?: string }) => {
@@ -403,11 +424,16 @@ export function AppIframeHost(props: AppIframeHostProps) {
     if (!invocationSentRef.current) {
       let cancelled = false
 
-      void buildInvocationArgs(args).then((invocationArgs) => {
-        if (cancelled || invocationSentRef.current) {
-          return
-        }
+      const sendInvocation = async () => {
+        const invocationArgs = await buildInvocationArgs(args)
+        if (cancelled || invocationSentRef.current) return
 
+        // Allow the app to process the init message and hydrate persisted
+        // state before we send the first tool invocation.
+        await new Promise((r) => setTimeout(r, 150))
+        if (cancelled || invocationSentRef.current) return
+
+        pendingIframeInvocationsRef.current.push(invocationId)
         sendToIframe({
           type: 'tool_invocation',
           toolName,
@@ -416,7 +442,8 @@ export function AppIframeHost(props: AppIframeHostProps) {
           state: persistedState,
         })
         invocationSentRef.current = true
-      })
+      }
+      void sendInvocation()
 
       return () => {
         cancelled = true
@@ -457,6 +484,20 @@ export function AppIframeHost(props: AppIframeHostProps) {
   }, [invocationId, isIframeReady, sendToIframe])
 
   useEffect(() => {
+    if (!isIframeReady) return
+    const unsubCtx = appEventBus.on('context_request', (event: { appId: string; requestId: string }) => {
+      if (event.appId !== appId) return
+      sendToIframe({ type: 'context_request', requestId: event.requestId })
+    })
+    const unsubHydrate = appEventBus.on('hydrate_state', (event: { appId: string; state: unknown }) => {
+      if (event.appId !== appId) return
+      setPersistedState(event.state)
+      sendToIframe({ type: 'hydrate_state', state: event.state })
+    })
+    return () => { unsubCtx(); unsubHydrate() }
+  }, [appId, isIframeReady, sendToIframe])
+
+  useEffect(() => {
     const handleMessage = (event: MessageEvent<unknown>) => {
       if (!iframeRef.current?.contentWindow || event.source !== iframeRef.current.contentWindow) {
         return
@@ -489,7 +530,7 @@ export function AppIframeHost(props: AppIframeHostProps) {
             void debouncedPersistState(data.state)
           }
           return
-        case 'tool_result':
+        case 'tool_result': {
           setAuthPending(false)
           setAuthProvider(null)
           if (data.state !== undefined) {
@@ -497,11 +538,24 @@ export function AppIframeHost(props: AppIframeHostProps) {
             void debouncedPersistState(data.state)
           }
           setStatus('active')
+
+          let resolvedId = data.invocationId
+          if (!resolvedId) {
+            // Chess app (or other apps) may not echo invocationId.
+            // Fall back to the most recent pending invocation sent through
+            // this iframe, or the original invocation as a last resort.
+            resolvedId = pendingIframeInvocationsRef.current.shift() ?? invocationId
+          } else {
+            const idx = pendingIframeInvocationsRef.current.indexOf(resolvedId)
+            if (idx !== -1) pendingIframeInvocationsRef.current.splice(idx, 1)
+          }
+
           void appEventBus.emit('result', {
-            invocationId: data.invocationId || invocationId,
+            invocationId: resolvedId,
             result: data.result,
           })
           return
+        }
         case 'completion':
           setAuthPending(false)
           setAuthProvider(null)
@@ -542,12 +596,27 @@ export function AppIframeHost(props: AppIframeHostProps) {
             suspendInvocationForAuth(invocationId)
           })()
           return
+        case 'context_response':
+          setPersistedState(data.state)
+          if (initSentRef.current) {
+            void debouncedPersistState(data.state)
+          }
+          return
         case 'error': {
           const message = data.message || 'App execution failed.'
           setStatus('error')
           setErrorMessage(message)
+
+          let errorInvId = data.invocationId
+          if (!errorInvId) {
+            errorInvId = pendingIframeInvocationsRef.current.shift() ?? invocationId
+          } else {
+            const idx = pendingIframeInvocationsRef.current.indexOf(errorInvId)
+            if (idx !== -1) pendingIframeInvocationsRef.current.splice(idx, 1)
+          }
+
           void appEventBus.emit('error', {
-            invocationId: data.invocationId || invocationId,
+            invocationId: errorInvId,
             error: {
               code: data.code,
               message,
